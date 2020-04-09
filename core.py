@@ -24,10 +24,43 @@ class Core(object):
     def bronzePackMethod(self):
         """ opens bronze packs and sells items """
 
+        rc = self.unassigned()
+
+        if rc != {}:
+            self.clear(rc)
+        
+        rc = self.buyPack(100)
+
+        if rc != {}:
+            self.clear(rc)
+
+    def buyPack(self, packId):
+        """ opens a pack """
+
+        method = 'POST'
+        url = 'purchased/items'
+
+        events = [self.pin.event('page_view', 'Hub - Store')]
+        self.pin.send(events)
+
+        data = {
+            'packId': 100,
+            'currency': 'COINS'
+        }
+        rc = self.__request__(method, url, data=json.dumps(data))
+
+        return rc
+
+    def addToSbc(self, leagueId, clubId, itemId, setId):
+        """ adds player to league sbc """
+
+        # TODO: check if sbc is full ? tradepile : add
+
     def autoSnipe(self):
         """ tries to snipe a certain query """
 
-        # TODO: Needs a buyItem(self, ) method   
+        # TODO: Needs a buyItem(self, ...etc) method
+        # TODO: Needs to determine how often to send request (any other ways to make undetectable?)  
 
     def unassigned(self):
         """ Returns unassigned items """
@@ -59,14 +92,10 @@ class Core(object):
 
         return rc
 
-    def unassignedClear(self, rc):
+    def clear(self, rc):
         """ Deals with unassigned items """
 
-        rc = self.unassigned()
-
         # TODO: Loop through and decide what to do with each
-
-        # self.quickSell(item['id'])
 
     def tradepileClear(self):
         """ Removes all sold items from tradepile """

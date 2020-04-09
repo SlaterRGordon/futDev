@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="wrapper">
+    <div class="navigation-modal">
+        <div class="navigation-modal-title">
+            {{ title }}
+        </div>
+        <div class="navigation-modal-content">
+            <a href="{{ url_for('bronzePackMethod') }}" class="navigation-modal-link" id="bronzePackMethod">Bronze Pack Method</a>
+            <a href="{{ url_for('sellTradePile') }}" class="navigation-modal-link" id="sellTradePile">Sell Tradepile</a>
+            <a href="{{ url_for('sellClub') }}" class="navigation-modal-link" id="sellClub">Sell Club</a>
+            <a href="{{ url_for('snipePlayer') }}" class="navigation-modal-link" id="snipePlayer">Snipe Player</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

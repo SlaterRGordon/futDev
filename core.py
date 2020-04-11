@@ -201,8 +201,11 @@ class Core(object):
         global count
         print(count)
         if count == 30:
+            print('30 requests taking break')
             time.sleep(240)
             count = 0
+        else:
+            count+=1
 
         data = data or {}
         params = params or {}
@@ -216,24 +219,9 @@ class Core(object):
         elif method.upper() == 'POST':
             rc = self.r.post(url, data=data, params=params, timeout=15)
         elif method.upper() == 'PUT':
-            print('request about to send')
-            print(self.r.headers)
             rc = self.r.put(url, data=data, params=params, timeout=15)
-            print('request sent')
-            print(rc.url)
-            print(data)
-            print(params)
-            print(rc.headers)
-            print(rc.status_code)
-            print(rc.cookies)
-            print(rc.content)
         elif method.upper() == 'DELETE':
             rc = self.r.delete(url, data=data, params=params, timeout=15)
-
-        
-        if url == 'sbs/challenge/629/squad':
-            print('request sent')
-            print(rc.content)
 
         if not rc.ok:
             if rc.status_code == 401:
@@ -516,6 +504,11 @@ class Core(object):
             print('couldn\'t be moved to %s pile because %s' % pile, rc['itemData'][0]['reason'])
 
         return rc['itemData'][0]['success']
+
+    def logout(self):
+        """ Logs out of webapp """
+
+        self.r.delete('https://%s/ut/auth' % self.futHost, timeout=15)
 
     
 

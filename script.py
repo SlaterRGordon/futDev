@@ -1,6 +1,13 @@
 from core import Core
-
-fut = Core('slats1999@gmail.com', '$Logan1992')
+from datetime import datetime
+import time
 
 while(True):
-    fut.bronzePackMethod()
+    timeStart = datetime.now()
+    fut = Core('slats1999@gmail.com', '$Logan1992')
+    while((datetime.now() - timeStart).seconds < 3600):
+        fut.bronzePackMethod()
+    fut.logout()
+    time.sleep(3600)
+
+    

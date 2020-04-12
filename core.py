@@ -6,6 +6,7 @@ import re
 import time
 from static import headers
 from pin import Pin
+from futbin import getPrice
 count = 0
 
 class Core(object):
@@ -241,13 +242,12 @@ class Core(object):
             elif rc.status_code == 478:
                 print('no trade existing error')
             else:
+                print(rc.status_code)
                 print('some error')
 
         if rc.text == '':
             return {}
         else:
-            print('has text')
-            print(rc.json())
             return rc.json()
 
     def bronzePackMethod(self):
@@ -293,11 +293,15 @@ class Core(object):
         """ adds player to league sbc """
 
         # TODO: check if sbc is full ? tradepile : add
+        print('start')
+
         method = 'GET'
         url = 'sbs/sets'
         rc = self.__request__(method, url)
         events = [self.pin.event('page_view', 'Hub - SBC')]
         self.pin.send(events)
+
+        print('end')
 
         url = 'sbs/setId/%s/challenges' % setId
         rc = self.__request__(method, url)
@@ -322,26 +326,28 @@ class Core(object):
             print(url)
             rc = self.__request__(method, url)
 
+            events = [self.pin.event('page_view', 'SBC - Squad')]
+            self.pin.send(events)
+
             if not ('squad' in rc):
                 print('starting challenge')
                 method = 'POST'
                 url = 'sbs/challenge/%s' % challengeId
                 rc = self.__request__(method, url)
-                method = 'GET'
-                url = 'sbs/challenge/%s/squad' % challengeId
-                rc = self.__request__(method, url)
+                
+                if not ('squad' in rc):
+                    print('challenge already complete')
+                    return
 
-
-            events = [self.pin.event('page_view', 'SBC - Squad')]
-            self.pin.send(events)
+                events = [self.pin.event('page_view', 'SBC Squad Details'), self.pin.event('page_view', 'SBC - Squad')]
+                self.pin.send(events)
 
             n = 0
             moved = False
             players = []
             for item in rc['squad']['players']:
                 if item['itemData']['id'] == itemId:
-                    print('item already in sbc, sending to tradepile')
-                    self.sendToPile('trade', itemId)
+                    print('item already in sbc, doing nothing')
                     return
                 if item['itemData']['id'] == 0 and not moved:
                     print('item has now been moved')
@@ -373,7 +379,7 @@ class Core(object):
         """ tries to snipe a certain query """
 
         # TODO: Needs a buyItem(self, ...etc) method
-        # TODO: Needs to determine how often to send request (any other ways to make undetectable?)  
+        # TODO: Needs to determine how often to send request (any other ways to make undetectable?) 
 
     def unassigned(self):
         """ Returns unassigned items """
@@ -444,10 +450,15 @@ class Core(object):
                     self.addToSbc(item['leagueId'], item['teamid'], item['id'], 149)
                 elif item['rareflag'] == 52:
                     print('sending carnibal player to tradepile')
+                    if getPrice(item['id']) != 0:
+                        self.sellItem(item['id'], getPrice(item['id'])-100, getPrice(item['id']))
+                    else:
+                        self.sendToPile('trade', item['id'])
+                elif getPrice(item['id']) >= 300:
+                    print('worth over 300, listing item')
+                    self.sellItem(item['id'], getPrice(item['id'])-100, getPrice(item['id'])) 
+                elif getPrice(item['id']) == 0:
                     self.sendToPile('trade', item['id'])
-                else:
-                    print('quick selling player')
-                    self.quickSell(item['id'])
                 continue
             elif 'resourceId' in item:
                 if item['resourceId'] == 5002004:
@@ -500,16 +511,65 @@ class Core(object):
 
         if rc['itemData'][0]['success']:
             print('moved to %s pile' % pile)
+        elif rc['itemData'][0]['reason'] == 'Duplicate Item Type':
+            print('duplicate sending to tradepile')
+            self.sendToPile('trade', itemId)
+            return
         else:
-            print('couldn\'t be moved to %s pile because %s' % pile, rc['itemData'][0]['reason'])
+            print('couldn\'t be moved to %s pile because %s' % (pile, rc['itemData'][0]['reason']))
 
         return rc['itemData'][0]['success']
+
+    def sellItem(self, itemId, bid, bin):
+        """ Sells item """
+
+        method = 'POST'
+        url = 'auctionhouse'
+
+        data = {'buyNowPrice': bin, 'startingBid': bid, 'duration': 3600, 'itemData': {'id': itemId}}
+        rc = self.__request__(method, url, data=json.dumps(data), params={'sku_b': self.skuB})
 
     def logout(self):
         """ Logs out of webapp """
 
         self.r.delete('https://%s/ut/auth' % self.futHost, timeout=15)
 
+    def clubToSbc(self, sort='desc', ctype='player', defId='', start=0, page_size=91):
+        method = 'GET'
+        url = 'club'
+
+        params = {'sort': sort, 'type': ctype, 'defId': defId, 'start': start, 'count': page_size}
+        rc = self.__request__(method, url, params=params)
+
+        if start == 0:
+            pgid = 'Club - Players - List View'
+
+            events = [self.pin.event('page_view', 'Hub - Club'), self.pin.event('page_view', pgid)]
+            if rc['itemData']:
+                events.append(self.pin.event('page_view', 'Item - Detail View'))
+            self.pin.send(events)
+
+            for item in rc['itemData']:
+                if item['rating'] <= 82:
+                    if item['leagueId'] == 16: # ligue1
+                        print('adding ligue1 player to sbc')
+                        self.addToSbc(item['leagueId'], item['teamid'], item['id'], 116)
+                    elif item['leagueId'] == 13: # prem
+                        print('adding prem player to sbc')
+                        self.addToSbc(item['leagueId'], item['teamid'], item['id'], 262)
+                    elif item['leagueId'] == 19: # bundes 
+                        print('adding bundes player to sbc')
+                        self.addToSbc(item['leagueId'], item['teamid'], item['id'], 95)
+                    elif item['leagueId'] == 53: # la liga
+                        print('adding la liga player to sbc')
+                        self.addToSbc(item['leagueId'], item['teamid'], item['id'], 367)
+                    elif item['leagueId'] == 31: # serie a
+                        print('adding serieA player to sbc')
+                        self.addToSbc(item['leagueId'], item['teamid'], item['id'], 156)
+                    elif item['leagueId'] == 39: # mls
+                        print('adding mls player to sbc')
+                        self.addToSbc(item['leagueId'], item['teamid'], item['id'], 149)
+            
     
 
     

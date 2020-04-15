@@ -3,6 +3,7 @@ import urllib
 from urlparse import urlparse
 import json
 import re
+import random
 import time
 from static import headers
 from pin import Pin
@@ -201,19 +202,13 @@ class Core(object):
 
         global count
         print(count)
-        if count == 30:
-            print('30 requests taking break')
-            time.sleep(240)
-            count = 0
-        else:
-            count+=1
 
         data = data or {}
         params = params or {}
         url = 'https://%s/%s/%s' % (self.futHost, self.gameUrl, url)
         self.r.options(url, params=params)
 
-        time.sleep(6)
+        time.sleep(2)
 
         if method.upper() == 'GET':
             rc = self.r.get(url, data=data, params=params, timeout=15)
@@ -223,6 +218,12 @@ class Core(object):
             rc = self.r.put(url, data=data, params=params, timeout=15)
         elif method.upper() == 'DELETE':
             rc = self.r.delete(url, data=data, params=params, timeout=15)
+
+
+        if url == 'https://%s/%s/%s' % (self.futHost, self.gameUrl, 'auctionhouse'):
+            print(rc.content)
+            print(rc.status_code)
+            print(rc.headers)
 
         if not rc.ok:
             if rc.status_code == 401:
@@ -244,6 +245,13 @@ class Core(object):
             else:
                 print(rc.status_code)
                 print('some error')
+
+        if count == 30:
+            print('30 requests taking break')
+            time.sleep(random.uniform(60, 120))
+            count = 0
+        else:
+            count+=1
 
         if rc.text == '':
             return {}
@@ -424,6 +432,7 @@ class Core(object):
 
         for item in rc[listName]:
             if item['itemType'] == 'player':
+                bin, bid = getPrice(item['assetId'])
                 if item['leagueId'] == 16: # ligue1
                     print('adding ligue1 player to sbc')
                     self.sendToPile('club', item['id'])
@@ -450,15 +459,20 @@ class Core(object):
                     self.addToSbc(item['leagueId'], item['teamid'], item['id'], 149)
                 elif item['rareflag'] == 52:
                     print('sending carnibal player to tradepile')
-                    if getPrice(item['id']) != 0:
-                        self.sellItem(item['id'], getPrice(item['id'])-100, getPrice(item['id']))
+                    if bin > 200:
+                        self.sendToPile('trade', item['id'])
+                        self.sellItem(item['id'], bid, bin)
                     else:
                         self.sendToPile('trade', item['id'])
-                elif getPrice(item['id']) >= 300:
+                elif bin >= 300:
                     print('worth over 300, listing item')
-                    self.sellItem(item['id'], getPrice(item['id'])-100, getPrice(item['id'])) 
-                elif getPrice(item['id']) == 0:
                     self.sendToPile('trade', item['id'])
+                    self.sellItem(item['id'], bid, bin) 
+                elif bin == 0:
+                    self.sendToPile('trade', item['id'])
+                else:
+                    print('worth 200 quickselling')
+                    self.quickSell(item['id'])
                 continue
             elif 'resourceId' in item:
                 if item['resourceId'] == 5002004:
@@ -515,6 +529,11 @@ class Core(object):
             print('duplicate sending to tradepile')
             self.sendToPile('trade', itemId)
             return
+        elif rc['itemData'][0]['reason'] == 'Destination Full':
+            print('tradepile full, clearing')
+            self.tradepileClear()
+            self.tradepileSell()
+            return
         else:
             print('couldn\'t be moved to %s pile because %s' % (pile, rc['itemData'][0]['reason']))
 
@@ -526,7 +545,17 @@ class Core(object):
         method = 'POST'
         url = 'auctionhouse'
 
-        data = {'buyNowPrice': bin, 'startingBid': bid, 'duration': 3600, 'itemData': {'id': itemId}}
+        print(str(bid) + " : " + str(bin) + " : " + str(itemId))
+        print(itemId)
+        data = {
+            'buyNowPrice': bin,
+            'startingBid': bid,
+            'duration': 3600,
+            'itemData': {
+                'id': itemId
+            }
+        }
+        print(data)
         rc = self.__request__(method, url, data=json.dumps(data), params={'sku_b': self.skuB})
 
     def logout(self):
@@ -569,6 +598,33 @@ class Core(object):
                     elif item['leagueId'] == 39: # mls
                         print('adding mls player to sbc')
                         self.addToSbc(item['leagueId'], item['teamid'], item['id'], 149)
+
+    def tradepileSell(self):
+        method = 'GET'
+        url = 'tradepile'
+
+        rc = self.__request__(method, url)
+
+        events = [self.pin.event('page_view', 'Hub - Transfers'), self.pin.event('page_view', 'Transfer List - List View')]
+        if rc.get('auctionInfo'):
+            events.append(self.pin.event('page_view', 'Item - Detail View'))
+        self.pin.send(events)
+
+        if 'auctionInfo' in rc:
+            for item in rc['auctionInfo']:
+                print('dealing with item on tradepile')
+                if item['tradeState'] == 'expired' or item['tradeState'] == '':
+                    bin, bid = getPrice(item['itemData']['assetId'])
+                    if bin == 0:
+                        print('skipping couldn\'t find price')
+                    elif bin > 200:
+                        self.sellItem(item['itemData']['id'], bid, bin)
+                    else:
+                        self.quickSell(item['itemData']['id'])
+
+
+
+            
             
     
 

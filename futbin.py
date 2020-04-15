@@ -21,4 +21,4 @@ def getPrice(itemId):
 
     print(int(rc['ps']['LCPrice']))
 
-    return int(rc['ps']['LCPrice'])
+    return int(rc['ps']['LCPrice']), int(rc['ps']['MinPrice'])

@@ -31,6 +31,7 @@ class Core(object):
         self.skuB = 'FFT20'
 
         self.pack = None
+        self.count = 0
         
         self.r = requests.Session()
         self.r.headers = {
@@ -218,6 +219,11 @@ class Core(object):
             print(params)
             print(data)
 
+        self.count += 1
+        if self.count == 90:
+            time.sleep(random.uniform(360, 420))
+            self.count = 0
+
         if resp.text != '':
             return resp.json()
         else:
@@ -238,8 +244,11 @@ class Core(object):
         elif resp['itemData'][0]['reason'] == 'Duplicate Item Type':
             return False
         
-        print(resp['itemData'][0]['reason'])
-        return False
+        self.tradepile()
+        self.clearSold()
+        sent = self.sendToPile('trade', itemId)
+
+        return sent
 
     def club(self, league=None, club=None, start=0, count=91):
         """ Get Club Items
@@ -282,13 +291,16 @@ class Core(object):
 
         return resp      
 
-    def openPack(self, packId):
+    def openPack(self, packId, preorder=False):
         """ Open Pack
         """
 
         method = 'POST'
         url = 'purchased/items'
-        data = {'currency': 'COINS', 'packId': packId}
+        if preorder:
+            data = {'currency': 0, 'packId': packId, 'usePreOrder': True}
+        else:
+            data = {'currency': 'COINS', 'packId': packId}
 
         events = [self.pin.event('page_view', 'Hub - Store')]
         self.pin.send(events)
@@ -447,6 +459,7 @@ class Core(object):
         """ Get Item Price
         """
 
+        oldBuy = 0
         buy = 0
         while(True):
             if buy == 0:
@@ -455,15 +468,20 @@ class Core(object):
                 resp = self.auction(assetId=assetId, maxBuy=buy)
             
             count = 0
-            for auction in resp['auctionInfo']:
-                if auction['buyNowPrice'] < buy or buy == 0:
-                    buy = auction['buyNowPrice']
-                count += 1
+            if 'auctionInfo' in resp:
+                for auction in resp['auctionInfo']:
+                    if auction['buyNowPrice'] < buy:
+                        buy = auction['buyNowPrice']
+                    count += 1
 
             if count < 3:
                 return buy
             elif buy == 200:
                 return 199
+            
+            if oldBuy == buy:
+                return buy
+            oldBuy = buy          
 
     def clearSold(self):
         """ Clear Trade Pile
@@ -473,7 +491,6 @@ class Core(object):
         url = 'trade/sold'
 
         resp = self.request(method, url)
-
 
     """
 
@@ -547,12 +564,17 @@ class Core(object):
 
         players = []
         moved = False
+        count = 0
         for i, player in enumerate(squad['squad']['players']):
             if player['itemData']['id'] == 0 and not moved:
                 players.append({'index': i, 'itemData': {'id': itemId, 'dream': 'false'}})
                 moved = True
+                count += 1
             else:
                 players.append({'index': i, 'itemData': {'id': player['itemData']['id'], 'dream': 'false'}})
+
+            if player['itemData']['id'] != 0:
+                count += 1
         
         if not moved:
             return False
@@ -560,6 +582,11 @@ class Core(object):
         method = 'PUT'
         url = 'sbs/challenge/%s/squad' % challengeId
         data = {'players': players}
+
+        if count > 10:
+            url = 'sbs/challenge/%s' % challengeId
+            params = {'skipUserSquadValidation': False}
+            resp = self.request(method, url, params=params)              
 
         self.request(method, url, data=json.dumps(data))
 
@@ -674,7 +701,7 @@ class Core(object):
             params = {'skipUserSquadValidation': False}
             resp = self.request(method, url, params=params)
             if 'grantedSetAwards' in resp:
-                self.pack = 509
+                self.pack = resp['grantedSetAwards'][0]['value']
 
         return True
 
@@ -704,13 +731,65 @@ class Core(object):
                         if not sent:
                             discard.append(item['id'])
                             self.toString('bronzeMethod: Sent Untradeable Player to Discard : %s' % sent)
+                        else:
+                            buy = self.price(item['assetId'])
+                            if buy > 199 and item['untradeable'] == False:
+                                sent = self.sendToPile('trade', item['id'])
+                                self.toString('bronzeMethod: Sending Duplicate Player to Tradepile : %s' % sent)
+                                if not sent:
+                                    discard.append(item['id'])
+                                    self.toString('bronzeMethod: Added Duplicate Player to Discard')
+                                else:
+                                    sold = self.sell(item['id'], buy)
+                                    self.toString('bronzeMethod: Selling Duplicate Player for %s : %s' % (buy, sold))
+                            elif buy == 0 and item['untradeable'] == False:
+                                sent = self.sendToPile('trade', item['id'])
+                                self.toString('bronzeMethod: Sending Player to Tradepile : %s' % sent)
+                                if not sent:
+                                    discard.append(item['id'])
+                                    self.toString('bronzeMethod: Sending Untradeable Player to Discard')
+                            else:
+                                discard.append(item['id'])
+                                self.toString('bronzeMethod: Sending Duplicate Player to Discard')
                     else:
                         added = self.addPlayer(item['id'], setId=setId, leagueId=item['leagueId'], clubId=item['teamid'])
                         self.toString('bronzeMethod: Added Player to League %s and Club %s : %s' % (item['leagueId'], item['teamid'], added))
+                        if not added:
+                            buy = self.price(item['assetId'])
+                            if buy > 199 and item['untradeable'] == False:
+                                sent = self.sendToPile('trade', item['id'])
+                                self.toString('bronzeMethod: Sending Duplicate Player to Tradepile : %s' % sent)
+                                if not sent:
+                                    discard.append(item['id'])
+                                    self.toString('bronzeMethod: Added Duplicate Player to Discard')
+                                else:
+                                    sold = self.sell(item['id'], buy)
+                                    self.toString('bronzeMethod: Selling Duplicate Player for %s : %s' % (buy, sold))
+                            elif buy == 0 and item['untradeable'] == False:
+                                sent = self.sendToPile('trade', item['id'])
+                                self.toString('bronzeMethod: Sending Player to Tradepile : %s' % sent)
+                                if not sent:
+                                    discard.append(item['id'])
+                                    self.toString('bronzeMethod: Sending Untradeable Player to Discard')
+                            else:
+                                if item['rating'] < 65:
+                                    added = self.addUpgrade(item['id'], item['preferredPosition'])
+                                    self.toString('bronzeMethod: Adding Player to Bronze Upgrade SBC : %s' % added)
+                                elif item['rating'] < 75:
+                                    added = self.addUpgrade(item['id'], item['preferredPosition'], 7, 16)
+                                    self.toString('bronzeMethod: Adding Player to Silver Upgrade SBC : %s' % added)
+                                else:
+                                    added = self.addUpgrade(item['id'], item['preferredPosition'], 8, 17)
+                                    self.toString('bronzeMethod: Adding Player to Gold Upgrade SBC : %s' % added)
+
+                                if not added:
+                                    discard.append(item['id'])
+                                    self.toString('bronzeMethod: Sending Untradeable Player to Discard')
                 else:
+                    self.toString('bronzeMethod: Player Price is')
                     buy = self.price(item['assetId'])
                     self.toString('bronzeMethod: Player Price is %s' % buy)
-                    if buy > 199:
+                    if buy > 199 and item['untradeable'] == False:
                         sent = self.sendToPile('trade', item['id'])
                         self.toString('bronzeMethod: Sending Player to Tradepile : %s' % sent)
                         if not sent:
@@ -719,7 +798,7 @@ class Core(object):
                         else:
                             sold = self.sell(item['id'], buy)
                             self.toString('bronzeMethod: Selling Player for %s : %s' % (buy, sold))
-                    elif buy == 0:
+                    elif buy == 0  and item['untradeable'] == False:
                         sent = self.sendToPile('trade', item['id'])
                         self.toString('bronzeMethod: Sending Player to Tradepile : %s' % sent)
                         if not sent:
@@ -727,6 +806,7 @@ class Core(object):
                             self.toString('bronzeMethod: Sending Untradeable Player to Discard')
                     else:
                         sent = self.sendToPile('club', item['id'])
+                        self.toString('bronzeMethod: Sending Player to Club : %s' % sent)
                         if item['rating'] < 65 and sent:
                             added = self.addUpgrade(item['id'], item['preferredPosition'])
                             self.toString('bronzeMethod: Adding Player to Bronze Upgrade SBC : %s' % added)
@@ -744,19 +824,18 @@ class Core(object):
                 sent = self.sendToPile('trade', item['id'])
                 self.toString('bronzeMethod: Sending Squad Fitness to Tradepile : %s' % sent)
                 if sent:
-                    sold = self.sell(item['id'], item['assetId'], 850, 1000)
+                    sold = self.sell(item['id'], 1000, realBid=850)
                     self.toString('bronzeMethod: Selling Squad Fitness for 850, 1000 : %s' % sold)
                 else:
                     sent = self.sendToPile('club', item['id'])
                     self.toString('bronzeMethod: Selling Squad Fitness for 850, 1000 : %s' % sent)
             elif 'name' in item:
-                if item['name'] == 'FreeCredits':
+                if item['name'] == 'FreeCredits' or item['name'] == 'FreeBronzePack':
                     self.redeem(item['id'])
                     self.toString('bronzeMethod: Redeemed Free Coins')
                 else:
                     discard.append(item['id'])
                     self.toString('bronzeMethod: Discarding %s' % item['name'])
-                # TODO : if item['name'] == 'FreeBronzePack':
             else:
                 discard.append(item['id'])
                 self.toString('bronzeMethod: Discarding Item')
@@ -766,7 +845,7 @@ class Core(object):
             self.toString('bronzeMethod: Quick Selling Discard : %s' % sold)
 
         if self.pack:
-            self.openPack(self.pack)
+            self.openPack(self.pack, preorder=True)
             self.toString('bronzeMethod: Opened Silver Pack')
             self.pack = None
         else:

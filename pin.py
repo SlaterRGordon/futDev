@@ -4,11 +4,11 @@ import time
 from datetime import datetime
 from random import random
 import requests
-from static import headers, pinUrl, releaseType
 
 
 class Pin(object):
-    def __init__(self, pidId, personaId, dob, sid):
+    def __init__(self, pidId, personaId, dob, sid, pinUrl):
+        self.pinUrl = pinUrl
         self.pidId = pidId
         self.personaId = personaId
         self.dob = dob
@@ -16,9 +16,19 @@ class Pin(object):
         self.s = 1
 
         self.r = requests.Session()
-        self.r.headers = headers
-        self.r.headers['Origin'] = 'https://www.easports.com'
-        self.r.headers['Referer'] = 'https://www.easports.com/fifa/ultimate-team/web-app/'
+        self.r.headers = {
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
+            'Connection': 'keep-alive',
+            'Host': 'accounts.ea.com',
+            'Origin': 'https://www.easports.com',
+            'Referer': 'https://www.easports.com/fifa/ultimate-team/web-app/',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'cross-site',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.113 Safari/537.36'
+        }
         self.r.headers['x-ea-game-id'] = 'FUT20WEB'
         self.r.headers['x-ea-game-id-type'] = 'easku'
         self.r.headers['x-ea-taxv'] = '1.1'
@@ -87,11 +97,9 @@ class Pin(object):
             'v': '20.4.2',
             'sid': self.sid
         }
-        self.r.options(pinUrl)
-        rc = self.r.post(pinUrl, data=json.dumps(data)).json()
+        self.r.options(self.pinUrl)
+        rc = self.r.post(self.pinUrl, data=json.dumps(data)).json()
         if rc['status'] != 'ok':
             print('pin event not okay')
-        else:
-            print('pin sent')
-
+            
         return True

@@ -1,54 +1,77 @@
-import requests, pickle
-import urllib
-from urlparse import urlparse
-import json
-import re
-import random
-import time
-from static import headers
+import requests, random, urlparse, json, time
+from datetime import datetime
+
 from pin import Pin
-from futbin import getPrice
-count = 0
+
 
 class Core(object):
+    
+    """
+    STARTING METHODS
+
+    """
     def __init__(self, email, password):
-        """ Initialization """
+        """ Initialize
+        """
+
+        self.email = email
+        self.password = password
+        
+        resp = requests.get('https://www.easports.com/fifa/ultimate-team/web-app/config/config.json').json()
+        self.authUrl = resp['authURL']
+        self.pinUrl = resp['pinURL']
+        self.clientId = resp['eadpClientId']
+        self.releaseType = resp['releaseType']
+
+        self.gameUrl = 'ut/game/fifa20'
+        self.futHost = 'utas.external.s2.fut.ea.com:443'
         self.clientId = 'FIFA-20-WEBCLIENT'
         self.gameSku = 'FFA20PS4'
         self.sku = 'FUT20WEB'
         self.skuB = 'FFT20'
-        self.gameUrl = 'ut/game/fifa20'
-        self.futHost = 'utas.external.s2.fut.ea.com:443'
-        self.__login__(email, password)
-        self.__launch__(email, password)
-
-    def __login__(self, email, password):
-        """ Logs in and stores the access token """
-
-        self.r = requests.Session()
-        self.r.headers
         
+        self.r = requests.Session()
+        self.r.headers = {
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
+            'Connection': 'keep-alive',
+            'Host': 'accounts.ea.com',
+            'Origin': 'https://www.easports.com',
+            'Referer': 'https://www.easports.com/fifa/ultimate-team/web-app/',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'cross-site',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.113 Safari/537.36'
+        }
+
+        self.login()
+
+    def login(self):
+        """ Login 
+        """
+
         params = {
             'prompt': 'login',
             'accessToken': '',
-            'client_id': 'FIFA-20-WEBCLIENT',
+            'client_id': self.clientId,
             'response_type': 'token',
             'display': 'web2/login',
             'locale': 'en_US',
             'redirect_uri': 'https://www.easports.com/fifa/ultimate-team/web-app/auth.html',
             'release_type': 'prod',
-            'scope': 'basic.identity offline signin basic.entitlement basic.persona',
+            'scope': 'basic.identity offline signin basic.entitlement basic.persona'
         }
-        rc = self.r.get('https://accounts.ea.com/connect/auth', params=params, timeout=15)
-        self.r.headers['Referer'] = rc.url
+        resp = self.r.get('https://accounts.ea.com/connect/auth', params=params)
+        self.r.headers['Referer'] = resp.url
 
         data = {
-            'email': email,
-            'password': password,
+            'email': self.email,
+            'password': self.password,
             'pn_text': '',
             'passwordForPhone': '',
             'country': 'CA',
-            'phoneNumber': '', 
+            'phoneNumber': '',
             '_rememberMe': 'on',
             'rememberMe': 'on',
             '_eventId': 'submit',
@@ -56,55 +79,30 @@ class Core(object):
             'isPhoneNumberLogin': 'false',
             'isIncompletePhone': ''
         }
-        rc = self.r.post(rc.url, data=data, timeout=15)
+        resp = self.r.post(resp.url, data=data, timeout=15)
+        resp = self.r.get(resp.url, params={'_eventId': 'end'}, timeout=15)
 
-        if "'successfulLogin': false" in rc.text:
-            print('unsuccessful login')
-
-        if 'var redirectUri' in rc.text:
-            rc = self.r.get(rc.url, params={'_eventId': 'end'})
-
-        if 'FIFA Ultimate Team</strong> needs to update your Account to help protect your gameplay experience.' in rc.text:
-            print("need to update account")
-            self.r.headers['Referer'] = rc.url
-            rc = self.r.post(rc.url.replace('s2', 's3'), {'_eventId': 'submit'}, timeout=15).content
-            self.r.headers['Referer'] = rc.url
-            rc = self.r.post(rc.url, {'twofactorType': 'EMAIL', 'country': 0, 'phoneNumber': '', '_eventId': 'submit'}, timeout=15)
-
-        if 'Login Verification' in rc.text:
-            print('Needs to be verified')
-
+        if 'Login Verification' in resp.text:
             data = {
                 'codeType': 'EMAIL',
                 '_eventId': 'submit'
             }
-            rc = self.r.post(rc.url, data=data, timeout=15)
-
-            while 'Too many attempts, retry in a few minutes' in rc.text:
-                print('too many attempts will retry in 4 minutes')
-                time.sleep(240)
-                return self.__login__(email, password)
+            resp = self.r.post(resp.url, data=data, timeout=15)
+            self.r.headers['Referer'] = resp.url
             
-            if 'Enter your security code' in rc.text:
-                code = input('Enter code: ')
+            code = input('Enter code: ')
+            data = {
+                'oneTimeCode': code,
+                '_trustThisDevice': 'on',
+                'trustThisDevice': 'on',
+                '_eventId': 'submit'
+            }
+            resp = self.r.post(resp.url, data=data, timeout=15)
+            print(resp.url)
 
-                self.r.headers['Referer'] = rc.url
-                rc = self.r.post(rc.url.replace('s3', 's4'), {'oneTimeCode': code, '_trustThisDevice': 'on', '_eventId': 'submit'}, timeout=15)
-        
-        print(rc.url)
-
-        rc = re.match('https://www.easports.com/fifa/ultimate-team/web-app/auth.html#access_token=(.+?)&token_type=(.+?)&expires_in=[0-9]+', rc.url)
-        if rc.group(1) and rc.group(2):
-            self.accessToken = rc.group(1)
-            self.tokenType = rc.group(2)
-        else:
-            print('couldn\'t find access token retrying login')
-            return self.__login__(email, password)
-
-    def __launch__(self, email, password):
-        """ Accesses fut web application """
-        
-        self.r.headers = headers
+        resp = urlparse.parse_qs(urlparse.urlparse(resp.url).fragment)
+        self.accessToken = resp['access_token'][0]
+        self.tokenType = resp['token_type'][0]
 
         params = {
             'response_type': 'token',
@@ -112,524 +110,587 @@ class Core(object):
             'prompt': 'none',
             'client_id': 'ORIGIN_JS_SDK'
         }
-        rc = self.r.get('https://accounts.ea.com/connect/auth', params=params, timeout=15).json()
-        self.accessToken = rc['access_token']
-        self.tokenType = rc['token_type']
+        self.r.headers['Referer'] = 'https://www.easports.com/fifa/ultimate-team/web-app/'
+        resp = self.r.get('https://accounts.ea.com/connect/auth', params=params, timeout=15).json()
+        self.accessToken = resp['access_token']
+        self.tokenType = resp['token_type']
 
         self.r.headers['Referer'] = 'https://www.easports.com/fifa/ultimate-team/web-app/'
         self.r.headers['Accept'] = 'application/json'
         self.r.headers['Authorization'] = '%s %s' % (self.tokenType, self.accessToken)
-        rc = self.r.get('https://gateway.ea.com/proxy/identity/pids/me').json()
-        if rc.get('error') == 'invalid_access_token':
-            print('invalid token')
-        self.pidId = rc['pid']['externalRefValue']
-        self.dob = rc['pid']['dob']
-        
-
+        resp = self.r.get('https://gateway.ea.com/proxy/identity/pids/me').json()
         del self.r.headers['Authorization']
-        self.r.headers['Easw-Session-Data-Nucleus-Id'] = self.pidId
+
+        self.dob = resp['pid']['dob']
+        self.r.headers['Easw-Session-Data-Nucleus-Id'] = self.pidId = resp['pid']['externalRefValue']
         params = {
             'filterConsoleLogin': 'true',
             'sku': self.sku,
             'returningUserGameYear': '2019'
         }
-        rc = self.r.get('https://%s/%s/user/accountinfo' % (self.futHost, self.gameUrl), params=params).json()
-        personas = rc['userAccountInfo']['personas']
+        resp = self.r.get('https://%s/%s/user/accountinfo' % (self.futHost, self.gameUrl), params=params, timeout=15).json()
+        personas = resp['userAccountInfo']['personas']
         for p in personas:
             for c in p['userClubList']:
                 if c['skuAccessList'] and self.gameSku in c['skuAccessList']:
                     self.personaId = p['personaId']
                     break
-        if not hasattr(self, 'personaId'):
-            print('error during launch, no persona found')
-            self.__login__(email, password)
-            return self.__launch__(email, password)
 
-        del self.r.headers['Easw-Session-Data-Nucleus-Id']
-        self.r.headers['Origin'] = 'http://www.easports.com'        
         params = {
             'client_id': 'FOS-SERVER',
             'redirect_uri': 'nucleus:rest',
             'response_type': 'code',
             'access_token': self.accessToken,
-            'release_type': 'prod'
+            'release_type': 'prod',
+            'client_sequence': 'ut-auth'
         }
-        rc = self.r.get('https://accounts.ea.com/connect/auth', params=params).json()
-        self.authCode = rc['code']
-
         self.r.headers['Content-Type'] = 'application/json'
+        resp = self.r.get('https://accounts.ea.com/connect/auth', params=params, timeout=15).json()
+        self.authCode = resp['code']
+
         data = {
-            'isReadOnly': 'false',
-            'sku': self.sku,
             'clientVersion': 1,
-            'locale': 'en-US',
-            'method': 'authCode',
-            'priorityLevel': 4,
+            'gameSku': self.gameSku,
             'identification': {
                 'authCode': self.authCode,
                 'redirectUrl': 'nucleus:rest'
             },
             'authCode': self.authCode,
             'redirectUrl': 'nucleus:rest',
+            'isReadOnly': 'false',
+            'locale': 'en-US',
+            'method': 'authcode',
             'nucleusPersonaId': self.personaId,
-            'gameSku': self.gameSku
+            'priorityLevel': 4,
+            'sku': self.sku
         }
-        rc = self.r.post('https://%s/ut/auth' % self.futHost, data=json.dumps(data), timeout=15)
-        if rc.status_code == 401:
-            print('multiple session')
-        if rc.status_code == 500:
-            print('Servers are probably temporary down.')
-        
-        rc = rc.json()
-        self.r.headers['X-UT-SID'] = self.sid = rc['sid']
-
+        resp = self.r.post('https://utas.external.s2.fut.ea.com/ut/auth', data=json.dumps(data), timeout=15).json()
+        self.r.headers['X-UT-SID'] = self.sid = resp['sid']
         self.r.headers['Easw-Session-Data-Nucleus-Id'] = self.pidId
-        rc = self.r.get('https://%s/%s/phishing/question' % (self.futHost, self.gameUrl), timeout=15).json()
-        if rc['code'] == 458:
-            print('captcha to solve...')
-        if rc['string'] != 'Already answered question' and rc['string'] != 'Feature Disabled':
-            print('needs phishing token...')
 
-        self.pin = Pin(pidId=self.pidId, personaId=self.personaId, dob=self.dob[:-3], sid=self.sid)
+        self.pin = Pin(pidId=self.pidId, personaId=self.personaId, dob=self.dob[:-3], sid=self.sid, pinUrl=self.pinUrl)
         events = [self.pin.event('login', status='success')]
         self.pin.send(events)
 
         events = [self.pin.event('page_view', 'Hub - Home')]
         self.pin.send(events)
 
-    def __request__(self, method, url, data=None, params=None):
-        """ Sends request and returns response in json format """
+    def logout(self):
+        """ Logout
+        """
 
-        global count
-        print(count)
+        events = [self.pin.event('page_view', 'Settings')]
+        self.pin.send(events)
+        self.r.delete('https://utas.external.s2.fut.ea.com/ut/auth', timeout=15)
+
+
+    """
+    GENERIC METHODS
+
+    """
+    def request(self, method, url, data=None, params=None):
+        """ Request
+        """
+
+        time.sleep(random.uniform(3,5))
 
         data = data or {}
         params = params or {}
         url = 'https://%s/%s/%s' % (self.futHost, self.gameUrl, url)
-        self.r.options(url, params=params)
 
-        time.sleep(2)
+        if method == 'GET':
+            resp = self.r.get(url, data=data, params=params, timeout=15)
+        elif method == 'POST':
+            resp = self.r.post(url, data=data, params=params, timeout=15)
+        elif method == 'PUT':
+            resp = self.r.put(url, data=data, params=params, timeout=15)
+        elif method == 'DELETE':
+            resp = self.r.delete(url, data=data, params=params, timeout=15)
 
-        if method.upper() == 'GET':
-            rc = self.r.get(url, data=data, params=params, timeout=15)
-        elif method.upper() == 'POST':
-            rc = self.r.post(url, data=data, params=params, timeout=15)
-        elif method.upper() == 'PUT':
-            rc = self.r.put(url, data=data, params=params, timeout=15)
-        elif method.upper() == 'DELETE':
-            rc = self.r.delete(url, data=data, params=params, timeout=15)
-
-
-        if url == 'https://%s/%s/%s' % (self.futHost, self.gameUrl, 'auctionhouse'):
-            print(rc.content)
-            print(rc.status_code)
-            print(rc.headers)
-
-        if not rc.ok:
-            if rc.status_code == 401:
-                print('expired session')
-            elif rc.status_code == 409:
-                print('conflict')
-            elif rc.status_code == 426 or rc.status_code == 429:
-                print('too many requests')
-            elif rc.status_code == 458:
-                print('error, logging out')
-            elif rc.status_code == 460 or rc.status_code == 461:
-                print('permission denied')
-            elif rc.status_code == 494:
-                print('market locked')
-            elif rc.status_code in (512, 521):
-                print('512/521 Temporary ban or just too many requests.')
-            elif rc.status_code == 478:
-                print('no trade existing error')
-            else:
-                print(rc.status_code)
-                print('some error')
-
-        if count == 30:
-            print('30 requests taking break')
-            time.sleep(random.uniform(60, 120))
-            count = 0
-        else:
-            count+=1
-
-        if rc.text == '':
-            return {}
-        else:
-            return rc.json()
-
-    def bronzePackMethod(self):
-        """ opens bronze packs and sells items """
-
-        # TODO: - I need to make it check transfer list size to make sure isn't full
-        #       - Add other leagues to clear() and send to tradepile
-        #       - create method that finds price
-
-        rc = self.unassigned()
-
-        if rc != {}:
-            print('clearing unassigned items')
-            self.clear(rc)
-        
-        rc = self.buyPack(100)
-
-        if rc != {}:
-            print('clearing pack items')
-            self.clear(rc)
-        else:
-            rc = self.unassigned()
-            self.clear(rc)
-
-    def buyPack(self, packId):
-        """ opens a pack """
-
-        method = 'POST'
-        url = 'purchased/items'
-
-        events = [self.pin.event('page_view', 'Hub - Store')]
-        self.pin.send(events)
-
-        data = {
-            'packId': 100,
-            'currency': 'COINS'
-        }
-        rc = self.__request__(method, url, data=json.dumps(data))
-
-        return rc
-
-    def addToSbc(self, leagueId, clubId, itemId, setId):
-        """ adds player to league sbc """
-
-        # TODO: check if sbc is full ? tradepile : add
-        print('start')
-
-        method = 'GET'
-        url = 'sbs/sets'
-        rc = self.__request__(method, url)
-        events = [self.pin.event('page_view', 'Hub - SBC')]
-        self.pin.send(events)
-
-        print('end')
-
-        url = 'sbs/setId/%s/challenges' % setId
-        rc = self.__request__(method, url)
-        events = [self.pin.event('page_view', 'SBC - Challenges')]
-        self.pin.send(events)
-
-        challengeId = ''
-        for challenge in rc['challenges']:
-            for item in challenge['elgReq']:
-                if item['type'] == 'CLUB_ID':
-                    if item['eligibilityValue'] == clubId:
-                        print('same club')
-                        challengeId = challenge['challengeId']
-                    break
-            if challengeId != '':
-                print(challengeId)
-                break
-   
-        if challengeId != '':
-            method = 'GET'
-            url = 'sbs/challenge/%s/squad' % challengeId
-            print(url)
-            rc = self.__request__(method, url)
-
-            events = [self.pin.event('page_view', 'SBC - Squad')]
-            self.pin.send(events)
-
-            if not ('squad' in rc):
-                print('starting challenge')
-                method = 'POST'
-                url = 'sbs/challenge/%s' % challengeId
-                rc = self.__request__(method, url)
-                
-                if not ('squad' in rc):
-                    print('challenge already complete')
-                    return
-
-                events = [self.pin.event('page_view', 'SBC Squad Details'), self.pin.event('page_view', 'SBC - Squad')]
-                self.pin.send(events)
-
-            n = 0
-            moved = False
-            players = []
-            for item in rc['squad']['players']:
-                if item['itemData']['id'] == itemId:
-                    print('item already in sbc, doing nothing')
-                    return
-                if item['itemData']['id'] == 0 and not moved:
-                    print('item has now been moved')
-                    print(itemId)
-                    item['itemData']['id'] = itemId
-                    moved = True
-                
-                if item['itemData']['id'] == 0:
-                    players.append({"index": n, "itemData": {"id": str(item['itemData']['id']), "dream": False}})
-                else:
-                    players.append({"index": n, "itemData": {"id": str(item['itemData']['id']), "dream": False}})
-
-                
-                n += 1
-
-            data = {'players': players}
-            method = 'PUT'
-
+        if not resp.ok:
+            print(resp.status_code)
+            print(resp.url)
+            print(resp.content)
+            print(params)
             print(data)
 
-            if not moved:
-                print('sbc full, sending to tradepile')
-                self.sendToPile('trade', itemId)
-            else:
-                print('added to sbc')
-                self.__request__(method, url, data=json.dumps(data))
-
-    def autoSnipe(self):
-        """ tries to snipe a certain query """
-
-        # TODO: Needs a buyItem(self, ...etc) method
-        # TODO: Needs to determine how often to send request (any other ways to make undetectable?) 
-
-    def unassigned(self):
-        """ Returns unassigned items """
-
-        method = 'GET'
-        url = 'purchased/items'
-
-        rc = self.__request__(method, url)
-
-        events = [self.pin.event('page_view', 'Unassigned Items - List View')]
-        if rc.get('itemData'):
-            events.append(self.pin.event('page_view', 'Item - Detail View'))
-        self.pin.send(events)
-
-        return rc
-
-    def tradepile(self):
-        """ Returns items from trade pile """
-
-        method = 'GET'
-        url = 'tradepile'
-
-        rc = self.__request__(method, url)
-
-        events = [self.pin.event('page_view', 'Hub - Transfers'), self.pin.event('page_view', 'Transfer List - List View')]
-        if rc.get('auctionInfo'):
-            events.append(self.pin.event('page_view', 'Item - Detail View'))
-        self.pin.send(events)
-
-        return rc
-
-    def clear(self, rc):
-        """ Deals with unassigned items """
-
-        if 'itemList' in rc:
-            listName = 'itemList'
-        elif 'itemData' in rc:
-            listName = 'itemData'
+        if resp.text != '':
+            return resp.json()
         else:
-            print('why tf is u here bro!!!')
-            self.bronzePackMethod()
+            return {}
 
-        for item in rc[listName]:
-            if item['itemType'] == 'player':
-                bin, bid = getPrice(item['assetId'])
-                if item['leagueId'] == 16: # ligue1
-                    print('adding ligue1 player to sbc')
-                    self.sendToPile('club', item['id'])
-                    self.addToSbc(item['leagueId'], item['teamid'], item['id'], 116)
-                elif item['leagueId'] == 13: # prem
-                    print('adding prem player to sbc')
-                    self.sendToPile('club', item['id'])
-                    self.addToSbc(item['leagueId'], item['teamid'], item['id'], 262)
-                elif item['leagueId'] == 19: # bundes 
-                    print('adding bundes player to sbc')
-                    self.sendToPile('club', item['id'])
-                    self.addToSbc(item['leagueId'], item['teamid'], item['id'], 95)
-                elif item['leagueId'] == 53: # la liga
-                    print('adding la liga player to sbc')
-                    self.sendToPile('club', item['id'])
-                    self.addToSbc(item['leagueId'], item['teamid'], item['id'], 367)
-                elif item['leagueId'] == 31: # serie a
-                    print('adding serieA player to sbc')
-                    self.sendToPile('club', item['id'])
-                    self.addToSbc(item['leagueId'], item['teamid'], item['id'], 156)
-                elif item['leagueId'] == 39: # mls
-                    print('adding mls player to sbc')
-                    self.sendToPile('club', item['id'])
-                    self.addToSbc(item['leagueId'], item['teamid'], item['id'], 149)
-                elif item['rareflag'] == 52:
-                    print('sending carnibal player to tradepile')
-                    if bin > 200:
-                        self.sendToPile('trade', item['id'])
-                        self.sellItem(item['id'], bid, bin)
-                    else:
-                        self.sendToPile('trade', item['id'])
-                elif bin >= 300:
-                    print('worth over 300, listing item')
-                    self.sendToPile('trade', item['id'])
-                    self.sellItem(item['id'], bid, bin) 
-                elif bin == 0:
-                    self.sendToPile('trade', item['id'])
-                else:
-                    print('worth 200 quickselling')
-                    self.quickSell(item['id'])
-                continue
-            elif 'resourceId' in item:
-                if item['resourceId'] == 5002004:
-                    print('sending squad fitness to trade pile')
-                    self.sendToPile('trade', item['id'])
-                    continue
-            elif 'name' in item:
-                if item['name'] == 'FreeCredits':
-                    print('redeeming free coins')
-                    self.redeem(item['id'])
-                    continue
-                else:
-                    print(item['name'])
-            
-            print('quick selling item')
-            self.quickSell(item['id'])
-
-    def tradepileClear(self):
-        """ Removes all sold items from tradepile """
-        
-        method = 'DELETE'
-        url = 'trade/sold'
-
-        self.__request__(method, url)
-
-    def quickSell(self, itemId):
-        """ Quick sells items """
-
-        method = 'DELETE'
-        url = 'item'
-
-        if not isinstance(itemId, (list, tuple)):
-            itemId = (itemId,)
-        itemId = (str(i) for i in itemId)
-        params = {'itemIds': ','.join(itemId)}
-
-        self.__request__(method, url, params=params)
-
-    def sendToPile(self, pile, itemId=None):
-        """ Sends item to pile """
+    def sendToPile(self, pile, itemId):
+        """ Send Item to Pile
+        """
 
         method = 'PUT'
         url = 'item'
+        data = {'itemData': [{'id': itemId, 'pile': pile}]}
 
-        if not isinstance(itemId, (list, tuple)):
-            itemId = (itemId,)
-        data = {"itemData": [{'pile': pile, 'id': str(i)} for i in itemId]}
+        resp = self.request(method, url, data=json.dumps(data))
 
-        rc = self.__request__(method, url, data=json.dumps(data))
+        if resp['itemData'][0]['success']:
+            return True
+        elif resp['itemData'][0]['reason'] == 'Duplicate Item Type':
+            return False
+        
+        print(resp['itemData'][0]['reason'])
+        return False
 
-        if rc['itemData'][0]['success']:
-            print('moved to %s pile' % pile)
-        elif rc['itemData'][0]['reason'] == 'Duplicate Item Type':
-            print('duplicate sending to tradepile')
-            self.sendToPile('trade', itemId)
-            return
-        elif rc['itemData'][0]['reason'] == 'Destination Full':
-            print('tradepile full, clearing')
-            self.tradepileClear()
-            self.tradepileSell()
-            return
-        else:
-            print('couldn\'t be moved to %s pile because %s' % (pile, rc['itemData'][0]['reason']))
+    def club(self, league=None, club=None, start=0, count=91):
+        """ Get Club Items
+        """
 
-        return rc['itemData'][0]['success']
-
-    def sellItem(self, itemId, bid, bin):
-        """ Sells item """
-
-        method = 'POST'
-        url = 'auctionhouse'
-
-        print(str(bid) + " : " + str(bin) + " : " + str(itemId))
-        print(itemId)
-        data = {
-            'buyNowPrice': bin,
-            'startingBid': bid,
-            'duration': 3600,
-            'itemData': {
-                'id': itemId
-            }
-        }
-        print(data)
-        rc = self.__request__(method, url, data=json.dumps(data), params={'sku_b': self.skuB})
-
-    def logout(self):
-        """ Logs out of webapp """
-
-        self.r.delete('https://%s/ut/auth' % self.futHost, timeout=15)
-
-    def clubToSbc(self, sort='desc', ctype='player', defId='', start=0, page_size=91):
         method = 'GET'
         url = 'club'
 
-        params = {'sort': sort, 'type': ctype, 'defId': defId, 'start': start, 'count': page_size}
-        rc = self.__request__(method, url, params=params)
+        events = [self.pin.event('page_view', 'Hub - Club')]
+        self.pin.send(events)
 
-        if start == 0:
-            pgid = 'Club - Players - List View'
+        params = {
+            'sort': 'desc',
+            'sortBy': 'value',
+            'type': 'player',
+            'start': start,
+            'count': count
+        }
+        if league:
+            params['league'] = league
+        if club:
+            params['team'] = club
 
-            events = [self.pin.event('page_view', 'Hub - Club'), self.pin.event('page_view', pgid)]
-            if rc['itemData']:
-                events.append(self.pin.event('page_view', 'Item - Detail View'))
-            self.pin.send(events)
+        resp = self.request(method, url, params=params)
+        events = [self.pin.event('page_view', 'Club - Players - List View')]
+        self.pin.send(events)
 
-            for item in rc['itemData']:
-                if item['rating'] <= 82:
-                    if item['leagueId'] == 16: # ligue1
-                        print('adding ligue1 player to sbc')
-                        self.addToSbc(item['leagueId'], item['teamid'], item['id'], 116)
-                    elif item['leagueId'] == 13: # prem
-                        print('adding prem player to sbc')
-                        self.addToSbc(item['leagueId'], item['teamid'], item['id'], 262)
-                    elif item['leagueId'] == 19: # bundes 
-                        print('adding bundes player to sbc')
-                        self.addToSbc(item['leagueId'], item['teamid'], item['id'], 95)
-                    elif item['leagueId'] == 53: # la liga
-                        print('adding la liga player to sbc')
-                        self.addToSbc(item['leagueId'], item['teamid'], item['id'], 367)
-                    elif item['leagueId'] == 31: # serie a
-                        print('adding serieA player to sbc')
-                        self.addToSbc(item['leagueId'], item['teamid'], item['id'], 156)
-                    elif item['leagueId'] == 39: # mls
-                        print('adding mls player to sbc')
-                        self.addToSbc(item['leagueId'], item['teamid'], item['id'], 149)
+        return resp
 
-    def tradepileSell(self):
+    def unassigned(self):
+        """ Get Unassigned Items
+        """
+
+        method = 'GET'
+        url = 'purchased/items'
+
+        resp = self.request(method, url)
+        events = [self.pin.event('page_view', 'Unassigned Items - List View')]
+        self.pin.send(events)
+
+        return resp      
+
+    def openPack(self, packId):
+        """ Open Pack
+        """
+
+        method = 'POST'
+        url = 'purchased/items'
+        data = {'currency': 'COINS', 'packId': packId}
+
+        events = [self.pin.event('page_view', 'Hub - Store')]
+        self.pin.send(events)
+        resp = self.request(method, url, data=json.dumps(data))
+        events = [self.pin.event('page_view', 'Unassigned Items - List View'), self.pin.event('page_view', 'Item - Detail View')]
+        self.pin.send(events)
+        
+        return resp
+
+    def redeem(self, itemId):
+        """ Redeems Item
+        """
+
+        method = 'POST'
+        url = 'item/%s' % itemId
+        data = {'apply': []}
+        self.request(method, url, data=json.dumps(data))
+
+        method = 'GET'
+        url = 'user/credits'
+        self.request(method, url)
+
+    def quickSell(self, itemIds):
+        """ Quicksell Items
+        """
+
+        method = 'DELETE'
+        url = 'item'
+
+        if not isinstance(itemIds, (list, tuple)):
+            itemIds = (itemIds,)
+        itemIds = (str(i) for i in itemIds)
+        params = {'itemIds': ','.join(itemIds)}
+
+        self.request(method, url, params=params)
+
+        return True
+
+    def toString(self, string):
+        """ Format Message
+        """
+
+        print('[' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '] ' + string)
+
+    """
+
+    AUCTION HOUSE METHODS
+
+    """
+    def tradepile(self):
+        """ Get Tradepile Items
+        """
+
         method = 'GET'
         url = 'tradepile'
 
-        rc = self.__request__(method, url)
-
         events = [self.pin.event('page_view', 'Hub - Transfers'), self.pin.event('page_view', 'Transfer List - List View')]
-        if rc.get('auctionInfo'):
-            events.append(self.pin.event('page_view', 'Item - Detail View'))
+        self.pin.send(events)
+        resp = self.request(method, url)
+        if 'auctionInfo' in resp:
+            events = [self.pin.event('page_view', 'Item - Detail View')]
         self.pin.send(events)
 
-        if 'auctionInfo' in rc:
-            for item in rc['auctionInfo']:
-                print('dealing with item on tradepile')
-                if item['tradeState'] == 'expired' or item['tradeState'] == '':
-                    bin, bid = getPrice(item['itemData']['assetId'])
-                    if bin == 0:
-                        print('skipping couldn\'t find price')
-                    elif bin > 200:
-                        self.sellItem(item['itemData']['id'], bid, bin)
+        return resp
+
+    def auction(self, assetId=None, maxBuy=None, maxBid=None, position=None, quality=None, nation=None, league=None, club=None, playStyle=None):
+        """ Get Auction Items
+        """
+        
+        method = 'GET'
+        url = 'transfermarket'
+        params = {
+            'start': 0,
+            'num': 21,
+            'type': 'player'
+        }
+        if assetId:
+            params['maskedDefId'] = assetId
+        if maxBuy:
+            params['maxb'] = maxBuy
+        if maxBid:
+            params['macr'] = maxBid
+        if position:
+            params['pos'] = position
+        if quality:
+            params['lev'] = quality
+        if nation:
+            params['nat'] = nation
+        if league:
+            params['leag'] = league
+        if club:
+            params['team'] = club
+        if playStyle:
+            params['playStyle'] = playStyle
+
+        events = [self.pin.event('page_view', 'Hub - Transfers'), self.pin.event('page_view', 'Transfer Market Search')]
+        self.pin.send(events)
+        resp = self.request(method, url, params=params)
+        events = [self.pin.event('page_view', 'Transfer Market Results - List View')]
+        self.pin.send(events)
+
+        return resp
+
+    def buy(self, tradeId, buy):
+        """ Buy Item on Auction House
+        """
+
+        method = 'PUT'
+        url = 'trade/%s/bid' % tradeId
+        data = {'bid': buy}
+
+        events = [self.pin.event('page_view', 'Hub - Transfers'), self.pin.event('page_view', 'Transfer List - List View')]
+        self.pin.send(events)
+        resp = self.request(method, url, data=json.dumps(data))
+
+        if 'itemData' in resp:
+            return True
+        else:
+            return False
+
+    def sell(self, itemId, buy, bid=None, duration=3600):
+        """ Sell Item on Auction House
+        """
+
+        method = 'POST'
+        url = 'auctionhouse'
+        
+        if buy < 1000:
+            buy = buy - (buy % 50)
+            bid = buy - 50
+        elif buy < 10000:
+            buy = buy - (buy % 100)
+            bid = buy - 100
+            if buy == 1000:
+                bid = 950
+        elif buy < 50000:
+            buy = buy - (buy % 250)
+            bid = buy - 250
+            if buy == 10000:
+                bid = 9900
+        elif buy > 50000:
+            buy = buy - (buy % 1000)
+            bid = buy - 1000
+            if buy == 50000:
+                bid = 49500
+
+        data = {'buyNowPrice': buy, 'duration': duration, 'itemData': {'id': itemId}, 'startingBid': bid}
+        self.request(method, url, data=json.dumps(data))
+
+        return True
+
+    def price(self, assetId):
+        """ Get Item Price
+        """
+
+        buy = 0
+        while(True):
+            if buy == 0:
+                resp = self.auction(assetId=assetId)
+            else:
+                resp = self.auction(assetId=assetId, maxBuy=buy)
+            
+            count = 0
+            for auction in resp['auctionInfo']:
+                if auction['buyNowPrice'] < buy or buy == 0:
+                    buy = auction['buyNowPrice']
+                count += 1
+
+            if count < 3:
+                return buy
+            elif buy == 200:
+                return 199
+
+    def clearSold(self):
+        """ Clear Trade Pile
+        """
+
+        method = 'DELETE'
+        url = 'trade/sold'
+
+        resp = self.request(method, url)
+
+
+    """
+
+    SBC METHODS
+
+    """
+    def getSets(self):
+        """ Get Sets
+        """
+
+        method = 'GET'
+        url = 'sbs/sets'
+
+        events = [self.pin.event('page_view', 'Hub - SBC')]
+        self.pin.send(events)
+        resp = self.request(method, url)
+
+        return resp    
+
+    def getChallenges(self, setId):
+        """ Get Set Challenges
+        """
+
+        method = 'GET'
+        url = 'sbs/setId/%s/challenges' % setId
+        resp = self.request(method, url)
+
+        if len(resp['challenges']) > 1:
+            events = [self.pin.event('page_view', 'SBC - Challenges')]
+            self.pin.send(events)
+
+        return resp
+
+    def getSquad(self, challengeId, started=True):
+        """ Get Challenge Squad
+        """
+
+        if started:
+            method = 'GET'
+            url = 'sbs/challenge/%s/squad' % challengeId
+        else:
+            method = 'POST'
+            url = 'sbs/challenge/%s' % challengeId
+        resp = self.request(method, url)
+
+        events = [self.pin.event('page_view', 'SBC Squad Details'), self.pin.event('page_view', 'SBC - Squad')]
+        self.pin.send(events)
+
+        return resp
+
+    def addPlayer(self, itemId, setId, challengeId=None, leagueId=None, clubId=None):
+        """ Add Player to Challenge Squad
+        """
+
+        self.getSets()
+        squad = None
+
+        if leagueId and clubId:
+            squad = self.findChallenge(setId, clubId)
+        elif challengeId:
+            challenges = self.getChallenges(setId)
+            for challenge in challenges['challenges']:
+                if challenge['challengeId'] == challengeId:
+                    if challenge['status'] == 'IN_PROGRESS':
+                        squad = self.getSquad(challengeId)
+                    elif challenge['status'] == 'NOT_STARTED':
+                        squad = self.getSquad(challengeId, started=False)
+
+        if squad == None:
+            return False
+
+        players = []
+        moved = False
+        for i, player in enumerate(squad['squad']['players']):
+            if player['itemData']['id'] == 0 and not moved:
+                players.append({'index': i, 'itemData': {'id': itemId, 'dream': 'false'}})
+                moved = True
+            else:
+                players.append({'index': i, 'itemData': {'id': player['itemData']['id'], 'dream': 'false'}})
+        
+        method = 'PUT'
+        url = 'sbs/challenge/%s/squad' % challengeId
+        data = {'players': players}
+
+        self.request(method, url, data=json.dumps(data))
+
+    def removePlayer(self, setId, challengeId, itemId):
+        """ Remove Player from Challenge Squad
+        """
+
+        self.getSets()
+        challenges = self.getChallenges(setId)
+
+        for challenge in challenges['challenges']:
+            if challenge['challengeId'] == challengeId:
+                if challenge['status'] == 'IN_PROGRESS':
+                    squad = self.getSquad(challengeId)
+                elif challenge['status'] == 'NOT_STARTED':
+                    squad = self.getSquad(challengeId, started=False)
+                else:
+                    return False
+
+        players = []
+        for i, player in enumerate(squad['squad']['players']):
+            if player['itemData']['id'] == itemId:
+                players.append({'index': i, 'itemData': {'id': 0, 'dream': 'false'}})
+            else:
+                players.append({'index': i, 'itemData': {'id': player['itemData']['id'], 'dream': 'false'}})
+
+        method = 'PUT'
+        url = 'sbs/challenge/%s/squad' % challengeId
+        data = {'players': players}
+
+        self.request(method, url, data=json.dumps(data))
+
+    def sumbitSquad(self, challengeId):
+        """ Submit Challenge Squad
+        """
+
+    def findSet(self, leagueId):
+        """ Find Player SetId
+        """
+
+        leagues = [(13, 262), (16, 116), (31, 156), (53, 367), (19, 95), (39, 149)]
+        for league in leagues:
+            if league[0] == leagueId:
+                return league[1]
+
+        return 0
+
+    def findChallenge(self, setId, clubId):
+        """ Find Player ChallengeId
+        """
+
+        challenges = self.getChallenges(setId)
+        for challenge in challenges['challenges']:
+            for item in challenge['elgReq']:
+                if item['type'] == 'CLUB_ID':
+                    if item['eligibilityValue'] == clubId:
+                        challengeId = challenge['challengeId']
+                        if challenge['status'] == 'IN_PROGRESS':
+                            return self.getSquad(challengeId)
+                        elif challenge['status'] == 'NOT_STARTED':
+                            return self.getSquad(challengeId, started=False)
+
+
+        return None
+
+
+    """
+    BRONZE PACK METHODS
+
+    """
+
+    def bronzeMethod(self):
+        """ Bronze Pack Method
+        """
+
+        discard = []
+        unassigned = self.unassigned()
+
+        for item in unassigned['itemData']:
+            if item['itemType'] == 'player':
+                self.toString('bronzeMethod: Dealing with an Player')
+                setId = self.findSet(item['leagueId'])
+                self.toString('bronzeMethod: SetId is %s' % setId)
+                if setId != 0:
+                    sent = self.sendToPile('club', item['id'])
+                    self.toString('bronzeMethod: Sent Player to Club : %s' % sent)
+                    if not sent:
+                        sent = self.sendToPile('trade', item['id'])
+                        self.toString('bronzeMethod: Sent Duplicate Player to Tradepile : %s' % sent)
+                        if not sent:
+                            discard.append(item['id'])
+                            self.toString('bronzeMethod: Sent Untradeable Player to Discard : %s' % sent)
                     else:
-                        self.quickSell(item['itemData']['id'])
+                        added = self.addPlayer(item['id'], setId=setId, leagueId=item['leagueId'], clubId=item['teamid'])
+                        self.toString('bronzeMethod: Added Player to League %s and Club %s : %s' % (leagueId, clubId, added))
+                else:
+                    buy = self.price(item['assetId'])
+                    self.toString('bronzeMethod: Player Price is %s' % buy)
+                    if buy > 199:
+                        sent = self.sendToPile('trade', item['id'])
+                        self.toString('bronzeMethod: Sending Player to Tradepile : %s' % sent)
+                        if not sent:
+                            discard.append(item['id'])
+                            self.toString('bronzeMethod: Added Player to Discard')
+                        else:
+                            sold = self.sell(item['id'], buy)
+                            self.toString('bronzeMethod: Selling Player for %s : %s' % (buy, sold))
+                    elif buy == 0:
+                        sent = self.sendToPile('trade', item['id'])
+                        self.toString('bronzeMethod: Sending Player to Tradepile : %s' % sent)
+                        if not sent:
+                            discard.append(item['id'])
+                            self.toString('bronzeMethod: Sending Untradeable Player to Discard')
+                    else:
+                        discard.append(item['id'])
+                        self.toString('bronzeMethod: Sending Player to Discard')
+            elif item['resourceId'] == 5002004:
+                sent = self.sendToPile('trade', item['id'])
+                self.toString('bronzeMethod: Sending Squad Fitness to Tradepile : %s' % sent)
+                if sent:
+                    sold = self.sell(item['id'], item['assetId'], 850, 1000)
+                    self.toString('bronzeMethod: Selling Squad Fitness for 850, 1000 : %s' % sold)
+                else:
+                    sent = self.sendToPile('club', item['id'])
+                    self.toString('bronzeMethod: Selling Squad Fitness for 850, 1000 : %s' % sent)
+            elif 'name' in item:
+                if item['name'] == 'FreeCredits':
+                    self.redeem(item['id'])
+                    self.toString('bronzeMethod: Redeemed Free Coins')
+                else:
+                    discard.append(item['id'])
+                    self.toString('bronzeMethod: Discarding %s' % item['name'])
+            else:
+                discard.append(item['id'])
+                self.toString('bronzeMethod: Discarding Item')
+
+        if len(discard) > 0:
+            sold = self.quickSell(discard)
+            self.toString('bronzeMethod: Quick Selling Discard : %s' % sold)
+
+        self.openPack(100)
+        self.toString('bronzeMethod: Opened New Pack')
 
 
-
-            
-            
-    
-
-    
-
-        
-
-        

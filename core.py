@@ -208,6 +208,8 @@ class Core(object):
             resp = self.r.delete(url, data=data, params=params, timeout=15)
 
         if not resp.ok:
+            print(method)
+            print(url)
             print(resp.status_code)
             print(resp.url)
             print(resp.content)
@@ -405,7 +407,7 @@ class Core(object):
         else:
             return False
 
-    def sell(self, itemId, buy, bid=None, duration=3600):
+    def sell(self, itemId, buy, realBid=None, duration=3600):
         """ Sell Item on Auction House
         """
 
@@ -430,6 +432,9 @@ class Core(object):
             bid = buy - 1000
             if buy == 50000:
                 bid = 49500
+
+        if realBid:
+            bid = realBid
 
         data = {'buyNowPrice': buy, 'duration': duration, 'itemData': {'id': itemId}, 'startingBid': bid}
         self.request(method, url, data=json.dumps(data))
@@ -525,7 +530,7 @@ class Core(object):
         squad = None
 
         if leagueId and clubId:
-            squad = self.findChallenge(setId, clubId)
+            squad, challengeId = self.findChallenge(setId, clubId)
         elif challengeId:
             challenges = self.getChallenges(setId)
             for challenge in challenges['challenges']:
@@ -608,12 +613,12 @@ class Core(object):
                     if item['eligibilityValue'] == clubId:
                         challengeId = challenge['challengeId']
                         if challenge['status'] == 'IN_PROGRESS':
-                            return self.getSquad(challengeId)
+                            return self.getSquad(challengeId), challengeId
                         elif challenge['status'] == 'NOT_STARTED':
-                            return self.getSquad(challengeId, started=False)
+                            return self.getSquad(challengeId, started=False), challengeId
 
 
-        return None
+        return [], challengeId
 
 
     """
@@ -644,7 +649,7 @@ class Core(object):
                             self.toString('bronzeMethod: Sent Untradeable Player to Discard : %s' % sent)
                     else:
                         added = self.addPlayer(item['id'], setId=setId, leagueId=item['leagueId'], clubId=item['teamid'])
-                        self.toString('bronzeMethod: Added Player to League %s and Club %s : %s' % (leagueId, clubId, added))
+                        self.toString('bronzeMethod: Added Player to League %s and Club %s : %s' % (item['leagueId'], item['teamid'], added))
                 else:
                     buy = self.price(item['assetId'])
                     self.toString('bronzeMethod: Player Price is %s' % buy)

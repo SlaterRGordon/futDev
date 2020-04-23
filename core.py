@@ -29,6 +29,8 @@ class Core(object):
         self.gameSku = 'FFA20PS4'
         self.sku = 'FUT20WEB'
         self.skuB = 'FFT20'
+
+        self.pack = None
         
         self.r = requests.Session()
         self.r.headers = {
@@ -552,11 +554,16 @@ class Core(object):
             else:
                 players.append({'index': i, 'itemData': {'id': player['itemData']['id'], 'dream': 'false'}})
         
+        if not moved:
+            return False
+
         method = 'PUT'
         url = 'sbs/challenge/%s/squad' % challengeId
         data = {'players': players}
 
         self.request(method, url, data=json.dumps(data))
+
+        return True
 
     def removePlayer(self, setId, challengeId, itemId):
         """ Remove Player from Challenge Squad
@@ -620,6 +627,56 @@ class Core(object):
 
         return [], challengeId
 
+    def addUpgrade(self, itemId, position, setId=6, challengeId=15):
+        """ Add Player to Bronze Upgrade SBC
+        """
+
+        positions = [(0, 'GK'), (1, 'LB'), (2, 'CB'), (3, 'CB'), (4, 'RB'), (5, 'CDM'), (6, 'RM'), (7, 'LM'), (8, 'CAM'), (9, 'ST'), (10, 'ST')]
+        self.getSets()
+
+        challenges = self.getChallenges(setId)
+        for challenge in challenges['challenges']:
+            if challenge['status'] == 'IN_PROGRESS':
+                squad = self.getSquad(challengeId)
+            elif challenge['status'] == 'NOT_STARTED':
+                squad = self.getSquad(challengeId, started=False)
+
+        players = []
+        moved = False
+        count = 0
+        for i, player in enumerate(squad['squad']['players']):
+            if i < 11:
+                if positions[i][1] == position and not moved:
+                    if player['itemData']['id'] == 0:
+                        players.append({'index': i, 'itemData': {'id': itemId, 'dream': 'false'}})
+                        moved = True
+                        count += 1
+                    else:
+                        players.append({'index': i, 'itemData': {'id': player['itemData']['id'], 'dream': 'false'}})
+                else:
+                        players.append({'index': i, 'itemData': {'id': player['itemData']['id'], 'dream': 'false'}})
+            else:
+                players.append({'index': i, 'itemData': {'id': 0, 'dream': 'false'}})
+
+            if player['itemData']['id'] != 0:
+                count += 1
+
+        if not moved:
+            return False
+        
+        method = 'PUT'
+        url = 'sbs/challenge/%s/squad' % challengeId
+        data = {'players': players}
+        self.request(method, url, data=json.dumps(data))
+
+        if count > 10:
+            url = 'sbs/challenge/15'
+            params = {'skipUserSquadValidation': False}
+            resp = self.request(method, url, params=params)
+            if 'grantedSetAwards' in resp:
+                self.pack = 509
+
+        return True
 
     """
     BRONZE PACK METHODS
@@ -669,8 +726,20 @@ class Core(object):
                             discard.append(item['id'])
                             self.toString('bronzeMethod: Sending Untradeable Player to Discard')
                     else:
-                        discard.append(item['id'])
-                        self.toString('bronzeMethod: Sending Player to Discard')
+                        sent = self.sendToPile('club', item['id'])
+                        if item['rating'] < 65 and sent:
+                            added = self.addUpgrade(item['id'], item['preferredPosition'])
+                            self.toString('bronzeMethod: Adding Player to Bronze Upgrade SBC : %s' % added)
+                        elif item['rating'] < 75 and sent:
+                            added = self.addUpgrade(item['id'], item['preferredPosition'], 7, 16)
+                            self.toString('bronzeMethod: Adding Player to Silver Upgrade SBC : %s' % added)
+                        elif sent:
+                            added = self.addUpgrade(item['id'], item['preferredPosition'], 8, 17)
+                            self.toString('bronzeMethod: Adding Player to Gold Upgrade SBC : %s' % added)
+                        
+                        if not added or not sent:
+                            discard.append(item['id'])
+                            self.toString('bronzeMethod: Sending Player to Discard')
             elif item['resourceId'] == 5002004:
                 sent = self.sendToPile('trade', item['id'])
                 self.toString('bronzeMethod: Sending Squad Fitness to Tradepile : %s' % sent)
@@ -687,6 +756,7 @@ class Core(object):
                 else:
                     discard.append(item['id'])
                     self.toString('bronzeMethod: Discarding %s' % item['name'])
+                # TODO : if item['name'] == 'FreeBronzePack':
             else:
                 discard.append(item['id'])
                 self.toString('bronzeMethod: Discarding Item')
@@ -695,7 +765,12 @@ class Core(object):
             sold = self.quickSell(discard)
             self.toString('bronzeMethod: Quick Selling Discard : %s' % sold)
 
-        self.openPack(100)
-        self.toString('bronzeMethod: Opened New Pack')
+        if self.pack:
+            self.openPack(self.pack)
+            self.toString('bronzeMethod: Opened Silver Pack')
+            self.pack = None
+        else:
+            self.openPack(100)
+            self.toString('bronzeMethod: Opened New Pack')
 
 

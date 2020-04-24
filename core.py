@@ -32,7 +32,9 @@ class Core(object):
 
         self.pack = None
         self.count = 0
-        
+
+        self.positions = [[[],[],[],[],[],[],[],[],[],[],[]], [[],[],[],[],[],[],[],[],[],[],[]], [[],[],[],[],[],[],[],[],[],[],[]]]
+
         self.r = requests.Session()
         self.r.headers = {
             'Accept': '*/*',
@@ -186,6 +188,8 @@ class Core(object):
         self.pin.send(events)
         self.r.delete('https://utas.external.s2.fut.ea.com/ut/auth', timeout=15)
 
+        exit()
+
 
     """
     GENERIC METHODS
@@ -195,7 +199,7 @@ class Core(object):
         """ Request
         """
 
-        time.sleep(random.uniform(3,5))
+        time.sleep(random.uniform(4,6))
 
         data = data or {}
         params = params or {}
@@ -211,6 +215,9 @@ class Core(object):
             resp = self.r.delete(url, data=data, params=params, timeout=15)
 
         if not resp.ok:
+            if resp.status_code == 458:
+                self.toString('request: Captcha, logging out...')
+                self.logout()
             print(method)
             print(url)
             print(resp.status_code)
@@ -221,7 +228,9 @@ class Core(object):
 
         self.count += 1
         if self.count == 90:
-            time.sleep(random.uniform(360, 420))
+            self.toString('request: 90 requests, taking break...')
+            self.checkUpgrades()
+            time.sleep(random.uniform(300, 360))
             self.count = 0
 
         if resp.text != '':
@@ -243,14 +252,15 @@ class Core(object):
             return True
         elif resp['itemData'][0]['reason'] == 'Duplicate Item Type':
             return False
-        
-        self.tradepile()
-        self.clearSold()
-        sent = self.sendToPile('trade', itemId)
+        elif resp['itemData'][0]['reason'] == 'Destination Full':
+            tradepile = self.tradepile()
+            self.clearSold()
+            self.toString('sendToPile: Tradepile Full, Clearing...')
+            self.clearTradepile(tradepile)
+            sent = self.sendToPile('trade', itemId)
+            return sent
 
-        return sent
-
-    def club(self, league=None, club=None, start=0, count=91):
+    def club(self, league=None, club=None, position=None, quality=None, start=0, count=91):
         """ Get Club Items
         """
 
@@ -271,6 +281,10 @@ class Core(object):
             params['league'] = league
         if club:
             params['team'] = club
+        if position:
+            params['pos'] = position
+        if quality:
+            params['level'] = quality
 
         resp = self.request(method, url, params=params)
         events = [self.pin.event('page_view', 'Club - Players - List View')]
@@ -308,7 +322,10 @@ class Core(object):
         events = [self.pin.event('page_view', 'Unassigned Items - List View'), self.pin.event('page_view', 'Item - Detail View')]
         self.pin.send(events)
         
-        return resp
+        if resp == {}:
+            return False
+
+        return True
 
     def redeem(self, itemId):
         """ Redeems Item
@@ -470,7 +487,7 @@ class Core(object):
             count = 0
             if 'auctionInfo' in resp:
                 for auction in resp['auctionInfo']:
-                    if auction['buyNowPrice'] < buy:
+                    if auction['buyNowPrice'] < buy or buy == 0:
                         buy = auction['buyNowPrice']
                     count += 1
 
@@ -491,6 +508,33 @@ class Core(object):
         url = 'trade/sold'
 
         resp = self.request(method, url)
+
+        print(resp)
+
+    def clearTradepile(self, tradepile):
+        """ Clear Full Tradepile
+        """
+
+        discard = []
+        for auction in tradepile['auctionInfo']:
+            if auction['tradeState'] == 'expired' or auction['tradeState'] == None:   
+                if auction['itemData']['rating'] < 82:
+                    buy = self.price(auction['itemData']['assetId'])
+                    if buy > 199:
+                        sold = self.sell(auction['itemData']['id'], buy)
+                        self.toString('clearTradepile: Selling Player for %s : %s' % (buy, sold))
+                    elif buy > 0:
+                        discard.append(auction['itemData']['id'])
+                        self.toString('clearTradepile: Adding Player to Discard')
+                elif auction['itemData']['resourceId'] == 5002004:
+                    sold = self.sell(auction['itemData']['id'], 1000)
+                    self.toString('clearTradepile: Selling Squad Fitness for %s : %s' % (buy, sold))
+                    
+
+        if discard:
+            self.quickSell(discard)
+            self.toString('clearTradepile: Quick Selling Discard')
+
 
     """
 
@@ -567,7 +611,7 @@ class Core(object):
         count = 0
         for i, player in enumerate(squad['squad']['players']):
             if player['itemData']['id'] == 0 and not moved:
-                players.append({'index': i, 'itemData': {'id': itemId, 'dream': 'false'}})
+                players.append({'index': i, 'itemData': {'id': int(itemId), 'dream': 'false'}})
                 moved = True
                 count += 1
             else:
@@ -651,205 +695,160 @@ class Core(object):
                         elif challenge['status'] == 'NOT_STARTED':
                             return self.getSquad(challengeId, started=False), challengeId
 
-
-        return [], challengeId
-
-    def addUpgrade(self, itemId, position, setId=6, challengeId=15):
-        """ Add Player to Bronze Upgrade SBC
-        """
-
-        positions = [(0, 'GK'), (1, 'LB'), (2, 'CB'), (3, 'CB'), (4, 'RB'), (5, 'CDM'), (6, 'RM'), (7, 'LM'), (8, 'CAM'), (9, 'ST'), (10, 'ST')]
-        self.getSets()
-
-        challenges = self.getChallenges(setId)
-        for challenge in challenges['challenges']:
-            if challenge['status'] == 'IN_PROGRESS':
-                squad = self.getSquad(challengeId)
-            elif challenge['status'] == 'NOT_STARTED':
-                squad = self.getSquad(challengeId, started=False)
-
-        players = []
-        moved = False
-        count = 0
-        for i, player in enumerate(squad['squad']['players']):
-            if i < 11:
-                if positions[i][1] == position and not moved:
-                    if player['itemData']['id'] == 0:
-                        players.append({'index': i, 'itemData': {'id': itemId, 'dream': 'false'}})
-                        moved = True
-                        count += 1
-                    else:
-                        players.append({'index': i, 'itemData': {'id': player['itemData']['id'], 'dream': 'false'}})
-                else:
-                        players.append({'index': i, 'itemData': {'id': player['itemData']['id'], 'dream': 'false'}})
-            else:
-                players.append({'index': i, 'itemData': {'id': 0, 'dream': 'false'}})
-
-            if player['itemData']['id'] != 0:
-                count += 1
-
-        if not moved:
-            return False
-        
-        method = 'PUT'
-        url = 'sbs/challenge/%s/squad' % challengeId
-        data = {'players': players}
-        self.request(method, url, data=json.dumps(data))
-
-        if count > 10:
-            url = 'sbs/challenge/15'
-            params = {'skipUserSquadValidation': False}
-            resp = self.request(method, url, params=params)
-            if 'grantedSetAwards' in resp:
-                self.pack = resp['grantedSetAwards'][0]['value']
-
-        return True
+        return [], 0
+            
 
     """
     BRONZE PACK METHODS
 
     """
-
-    def bronzeMethod(self):
+    # TODO Go through each method used in here and make better
+    def bronzeMethod(self, packId=100):
         """ Bronze Pack Method
         """
 
         discard = []
         unassigned = self.unassigned()
+        positions = [['GK'], ['RB'], ['CB'], ['CB'], ['LB'], ['CDM', 'CM'], ['RM, RW'], ['LM, LW'], ['CAM', 'CM'], ['ST'], ['ST']]
 
         for item in unassigned['itemData']:
             if item['itemType'] == 'player':
-                self.toString('bronzeMethod: Dealing with an Player')
+
                 setId = self.findSet(item['leagueId'])
-                self.toString('bronzeMethod: SetId is %s' % setId)
+                self.toString('bronzeMethod: SetId: %s' % setId)
+                
                 if setId != 0:
                     sent = self.sendToPile('club', item['id'])
-                    self.toString('bronzeMethod: Sent Player to Club : %s' % sent)
-                    if not sent:
-                        sent = self.sendToPile('trade', item['id'])
-                        self.toString('bronzeMethod: Sent Duplicate Player to Tradepile : %s' % sent)
-                        if not sent:
-                            discard.append(item['id'])
-                            self.toString('bronzeMethod: Sent Untradeable Player to Discard : %s' % sent)
-                        else:
-                            buy = self.price(item['assetId'])
-                            if buy > 199 and item['untradeable'] == False:
-                                sent = self.sendToPile('trade', item['id'])
-                                self.toString('bronzeMethod: Sending Duplicate Player to Tradepile : %s' % sent)
-                                if not sent:
-                                    discard.append(item['id'])
-                                    self.toString('bronzeMethod: Added Duplicate Player to Discard')
-                                else:
-                                    sold = self.sell(item['id'], buy)
-                                    self.toString('bronzeMethod: Selling Duplicate Player for %s : %s' % (buy, sold))
-                            elif buy == 0 and item['untradeable'] == False:
-                                sent = self.sendToPile('trade', item['id'])
-                                self.toString('bronzeMethod: Sending Player to Tradepile : %s' % sent)
-                                if not sent:
-                                    discard.append(item['id'])
-                                    self.toString('bronzeMethod: Sending Untradeable Player to Discard')
-                            else:
-                                discard.append(item['id'])
-                                self.toString('bronzeMethod: Sending Duplicate Player to Discard')
-                    else:
+                    self.toString('bronzeMethod: Sent League Player to Club : %s' % sent)
+                    if sent:
                         added = self.addPlayer(item['id'], setId=setId, leagueId=item['leagueId'], clubId=item['teamid'])
-                        self.toString('bronzeMethod: Added Player to League %s and Club %s : %s' % (item['leagueId'], item['teamid'], added))
-                        if not added:
-                            buy = self.price(item['assetId'])
-                            if buy > 199 and item['untradeable'] == False:
-                                sent = self.sendToPile('trade', item['id'])
-                                self.toString('bronzeMethod: Sending Duplicate Player to Tradepile : %s' % sent)
-                                if not sent:
-                                    discard.append(item['id'])
-                                    self.toString('bronzeMethod: Added Duplicate Player to Discard')
-                                else:
-                                    sold = self.sell(item['id'], buy)
-                                    self.toString('bronzeMethod: Selling Duplicate Player for %s : %s' % (buy, sold))
-                            elif buy == 0 and item['untradeable'] == False:
-                                sent = self.sendToPile('trade', item['id'])
-                                self.toString('bronzeMethod: Sending Player to Tradepile : %s' % sent)
-                                if not sent:
-                                    discard.append(item['id'])
-                                    self.toString('bronzeMethod: Sending Untradeable Player to Discard')
-                            else:
-                                if item['rating'] < 65:
-                                    added = self.addUpgrade(item['id'], item['preferredPosition'])
-                                    self.toString('bronzeMethod: Adding Player to Bronze Upgrade SBC : %s' % added)
-                                elif item['rating'] < 75:
-                                    added = self.addUpgrade(item['id'], item['preferredPosition'], 7, 16)
-                                    self.toString('bronzeMethod: Adding Player to Silver Upgrade SBC : %s' % added)
-                                else:
-                                    added = self.addUpgrade(item['id'], item['preferredPosition'], 8, 17)
-                                    self.toString('bronzeMethod: Adding Player to Gold Upgrade SBC : %s' % added)
+                        self.toString('bronzeMethod: Added League Player to SBC : %s' % added)
+                        continue
+                
+                buy = self.price(item['assetId'])
+                self.toString('bronzeMethod: Price: %s' % buy)
+                if buy > 199:
+                    sent = self.sendToPile('trade', item['id'])
+                    self.toString('bronzeMethod: Sent Player to Trade : %s' % sent)
+                    if sent:
+                        sold = self.sell(item['id'], buy)
+                        self.toString('bronzeMethod: Listed Player for %s : %s' % (buy, sold))
+                        continue
 
-                                if not added:
-                                    discard.append(item['id'])
-                                    self.toString('bronzeMethod: Sending Untradeable Player to Discard')
-                else:
-                    self.toString('bronzeMethod: Player Price is')
-                    buy = self.price(item['assetId'])
-                    self.toString('bronzeMethod: Player Price is %s' % buy)
-                    if buy > 199 and item['untradeable'] == False:
-                        sent = self.sendToPile('trade', item['id'])
-                        self.toString('bronzeMethod: Sending Player to Tradepile : %s' % sent)
-                        if not sent:
-                            discard.append(item['id'])
-                            self.toString('bronzeMethod: Added Player to Discard')
-                        else:
-                            sold = self.sell(item['id'], buy)
-                            self.toString('bronzeMethod: Selling Player for %s : %s' % (buy, sold))
-                    elif buy == 0  and item['untradeable'] == False:
-                        sent = self.sendToPile('trade', item['id'])
-                        self.toString('bronzeMethod: Sending Player to Tradepile : %s' % sent)
-                        if not sent:
-                            discard.append(item['id'])
-                            self.toString('bronzeMethod: Sending Untradeable Player to Discard')
-                    else:
-                        sent = self.sendToPile('club', item['id'])
-                        self.toString('bronzeMethod: Sending Player to Club : %s' % sent)
-                        if item['rating'] < 65 and sent:
-                            added = self.addUpgrade(item['id'], item['preferredPosition'])
-                            self.toString('bronzeMethod: Adding Player to Bronze Upgrade SBC : %s' % added)
-                        elif item['rating'] < 75 and sent:
-                            added = self.addUpgrade(item['id'], item['preferredPosition'], 7, 16)
-                            self.toString('bronzeMethod: Adding Player to Silver Upgrade SBC : %s' % added)
-                        elif sent:
-                            added = self.addUpgrade(item['id'], item['preferredPosition'], 8, 17)
-                            self.toString('bronzeMethod: Adding Player to Gold Upgrade SBC : %s' % added)
-                        
-                        if not added or not sent:
-                            discard.append(item['id'])
-                            self.toString('bronzeMethod: Sending Player to Discard')
+                sent = self.sendToPile('club', item['id'])
+                self.toString('bronzeMethod: Sent Player to Club : %s' % sent)
+                if sent:
+                    for i, postionList in enumerate(positions):
+                        for position in postionList:
+                            if position == item['preferredPosition']:
+                                if item['rating'] < 65:
+                                    self.positions[0][i].append(item['id'])
+                                elif item['rating'] < 75:
+                                    self.positions[1][i].append(item['id'])
+                                else:
+                                    self.positions[2][i].append(item['id'])
+                    continue
+
             elif item['resourceId'] == 5002004:
                 sent = self.sendToPile('trade', item['id'])
-                self.toString('bronzeMethod: Sending Squad Fitness to Tradepile : %s' % sent)
+                self.toString('bronzeMethod: Sent Squad Fitness to Trade : %s' % sent)
                 if sent:
-                    sold = self.sell(item['id'], 1000, realBid=850)
-                    self.toString('bronzeMethod: Selling Squad Fitness for 850, 1000 : %s' % sold)
-                else:
-                    sent = self.sendToPile('club', item['id'])
-                    self.toString('bronzeMethod: Selling Squad Fitness for 850, 1000 : %s' % sent)
+                    sold = self.sell(item['id'], buy)
+                    self.toString('bronzeMethod: Listed Squad Fitness for %s : %s' % (buy, sold))
+                    continue
+
             elif 'name' in item:
                 if item['name'] == 'FreeCredits' or item['name'] == 'FreeBronzePack':
                     self.redeem(item['id'])
-                    self.toString('bronzeMethod: Redeemed Free Coins')
-                else:
-                    discard.append(item['id'])
-                    self.toString('bronzeMethod: Discarding %s' % item['name'])
-            else:
-                discard.append(item['id'])
-                self.toString('bronzeMethod: Discarding Item')
+                    self.toString('bronzeMethod: Redeemed %s' % item['name'])
+                    continue
+            
+            discard.append(item['id'])
+            self.toString('bronzeMethod: Adding to Discard')
 
         if len(discard) > 0:
             sold = self.quickSell(discard)
             self.toString('bronzeMethod: Quick Selling Discard : %s' % sold)
 
-        if self.pack:
-            self.openPack(self.pack, preorder=True)
-            self.toString('bronzeMethod: Opened Silver Pack')
-            self.pack = None
-        else:
-            self.openPack(100)
-            self.toString('bronzeMethod: Opened New Pack')
+        opened = self.openPack(packId)
+        self.toString('bronzeMethod: Opened New Pack')
 
+    def upgradeSbc(self):
+        """ Bronze Pack Method
+        """
+
+        positions = [['GK'], ['RB'], ['CB'], ['CB'], ['LB'], ['CDM', 'CM'], ['RM, RW'], ['LM, LW'], ['CAM', 'CM'], ['ST'], ['ST']]
+        qualities = ['bronze', 'silver', 'gold']
+
+        self.getSets()
+
+        for index in range(3):
+            setId = 6+index
+            challengeId = 15+index
+            print('setId: %s, challengeId: %s' % (setId, challengeId))
+            challenges = self.getChallenges(setId)
+            for challenge in challenges['challenges']:
+                if challenge['status'] == 'IN_PROGRESS':
+                    squad = self.getSquad(challengeId)
+                elif challenge['status'] == 'NOT_STARTED':
+                    squad = self.getSquad(challengeId, started=False)
+
+            players = []
+            itemIds = []
+            for i, player in enumerate(squad['squad']['players']):
+                players.append({'index': i, 'itemData': {'id': player['itemData']['id'], 'dream': 'false'}})
+
+            count = 0
+            for i, player in enumerate(players):
+                if i < 11 and player['itemData']['id'] == 0:
+                    if self.positions[index][i]:
+                        itemId = self.positions[index][i].pop()
+                        player['itemData']['id'] = itemId
+                        method = 'PUT'
+                        url = 'sbs/challenge/%s/squad' % challengeId
+                        data = {'players': players}
+                        resp = self.request(method, url, data=json.dumps(data))
+                        print('added to sbc, %s - %s' % (qualities[index], count))
+                        count += 1
+                        continue
+                elif i < 11 and player['itemData']['id'] != 0:
+                    count += 1
+            print(players)
+            print(count)
+            if count > 10:
+                method = 'PUT'
+                url = 'sbs/challenge/%s' % challengeId
+                params = {'skipUserSquadValidation': False}
+                resp = self.request(method, url, params=params)
+                if 'grantedSetAwards' in resp:
+                    print('completed sbc, %s' % qualities[index])
+                    self.bronzeMethod(resp['grantedSetAwards'][0]['value'])
+    
+    def checkUpgrades(self):
+        """ Format Message
+        """
+
+        for i in range(3):
+            ready = True
+            for j in range(11):
+                if not self.positions[i][j]:
+                    self.toString('checkUpgrades: %s Not Ready' % i)
+                    ready = False
+                    break
+            else:
+                ready = False
+
+            if ready:
+                self.upgradeSbc()
+
+
+
+                            
+
+
+                                
+
+
+
+        
 

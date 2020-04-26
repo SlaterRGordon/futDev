@@ -709,7 +709,7 @@ class Core(object):
 
         discard = []
         unassigned = self.unassigned()
-        positions = [['GK'], ['RB'], ['CB'], ['CB'], ['LB'], ['CDM', 'CM'], ['RM, RW'], ['LM, LW'], ['CAM', 'CM'], ['ST'], ['ST']]
+        positions = [['GK'], ['RB'], ['CB'], ['CB'], ['LB'], ['CDM', 'CM'], ['RM', 'RW'], ['LM', 'LW'], ['CAM', 'CM'], ['ST'], ['ST']]
 
         for item in unassigned['itemData']:
             if item['itemType'] == 'player':
@@ -741,6 +741,7 @@ class Core(object):
                     for i, postionList in enumerate(positions):
                         for position in postionList:
                             if position == item['preferredPosition']:
+                                print(position)
                                 if item['rating'] < 65:
                                     self.positions[0][i].append(item['id'])
                                 elif item['rating'] < 75:
@@ -753,8 +754,8 @@ class Core(object):
                 sent = self.sendToPile('trade', item['id'])
                 self.toString('bronzeMethod: Sent Squad Fitness to Trade : %s' % sent)
                 if sent:
-                    sold = self.sell(item['id'], buy)
-                    self.toString('bronzeMethod: Listed Squad Fitness for %s : %s' % (buy, sold))
+                    sold = self.sell(item['id'], 1000)
+                    self.toString('bronzeMethod: Listed Squad Fitness for %s : %s' % (1000, sold))
                     continue
 
             elif 'name' in item:

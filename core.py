@@ -33,7 +33,12 @@ class Core(object):
         self.pack = None
         self.count = 0
 
-        self.positions = [[[],[],[],[],[],[],[],[],[],[],[]], [[],[],[],[],[],[],[],[],[],[],[]], [[],[],[],[],[],[],[],[],[],[],[]]]
+        # self.positions = [[[],[],[],[],[],[],[],[],[],[],[]], [[],[],[],[],[],[],[],[],[],[],[]], [[],[],[],[],[],[],[],[],[],[],[]]]
+        self.positions = {
+            'bronze': {'GK': [], 'RB': [], 'CB': [], 'LB': [], 'CDM': [], 'CM': [], 'RM': [], 'LM': [], 'CAM': [], 'ST': []},
+            'silver': {'GK': [], 'RB': [], 'CB': [], 'LB': [], 'CDM': [], 'CM': [], 'RM': [], 'LM': [], 'CAM': [], 'ST': []},
+            'gold': {'GK': [], 'RB': [], 'CB': [], 'LB': [], 'CDM': [], 'CM': [], 'RM': [], 'LM': [], 'CAM': [], 'ST': []}
+        }
 
         self.r = requests.Session()
         self.r.headers = {
@@ -199,7 +204,7 @@ class Core(object):
         """ Request
         """
 
-        time.sleep(random.uniform(4,6))
+        time.sleep(random.uniform(2,4))
 
         data = data or {}
         params = params or {}
@@ -229,7 +234,6 @@ class Core(object):
         self.count += 1
         if self.count == 90:
             self.toString('request: 90 requests, taking break...')
-            self.checkUpgrades()
             time.sleep(random.uniform(300, 360))
             self.count = 0
 
@@ -248,19 +252,22 @@ class Core(object):
 
         resp = self.request(method, url, data=json.dumps(data))
 
-        if resp['itemData'][0]['success']:
-            return True
-        elif resp['itemData'][0]['reason'] == 'Duplicate Item Type':
+        if 'itemData' in resp:
+            if resp['itemData'][0]['success']:
+                return True
+            elif resp['itemData'][0]['reason'] == 'Duplicate Item Type':
+                return False
+            elif resp['itemData'][0]['reason'] == 'Destination Full':
+                tradepile = self.tradepile()
+                self.clearSold()
+                self.toString('sendToPile: Tradepile Full, Clearing...')
+                self.clearTradepile(tradepile)
+                sent = self.sendToPile('trade', itemId)
+                return sent
+        else:
             return False
-        elif resp['itemData'][0]['reason'] == 'Destination Full':
-            tradepile = self.tradepile()
-            self.clearSold()
-            self.toString('sendToPile: Tradepile Full, Clearing...')
-            self.clearTradepile(tradepile)
-            sent = self.sendToPile('trade', itemId)
-            return sent
 
-    def club(self, league=None, club=None, position=None, quality=None, start=0, count=91):
+    def club(self, league=None, club=None, position=None, quality=None, rating=None, start=0, count=91):
         """ Get Club Items
         """
 
@@ -282,11 +289,12 @@ class Core(object):
         if club:
             params['team'] = club
         if position:
-            params['pos'] = position
+            params['position'] = position
         if quality:
             params['level'] = quality
 
         resp = self.request(method, url, params=params)
+        print(params)
         events = [self.pin.event('page_view', 'Club - Players - List View')]
         self.pin.send(events)
 
@@ -367,9 +375,9 @@ class Core(object):
     AUCTION HOUSE METHODS
 
     """
+
     def tradepile(self):
-        """ Get Tradepile Items
-        """
+        """ Get Tradepile and Return it """
 
         method = 'GET'
         url = 'tradepile'
@@ -383,68 +391,98 @@ class Core(object):
 
         return resp
 
-    def auction(self, assetId=None, maxBuy=None, maxBid=None, position=None, quality=None, nation=None, league=None, club=None, playStyle=None):
-        """ Get Auction Items
-        """
-        
+    def clearSold(self):
+        """ Clear Sold Items on Tradepile """
+
+        method = 'DELETE'
+        url = 'trade/sold'
+        self.request(method, url)
+
+    def tradeStatus(self, tradeId):
+        """ Get the Trade's Status """
+
+        method = 'GET'
+        url = 'trade/status'
+        params = {'tradeIds': tradeId}
+        resp = self.request(method, url, params=params)
+        return resp
+
+    def search(self, start=0, num=21, type='player', maskedDefId=None, zone=None, pos=None, lev=None, nat=None, leag=None, team=None, playStyle=None, micr=None, macr=None, minb=None, maxb=None):
+        """ Search Auctions """
+
         method = 'GET'
         url = 'transfermarket'
-        params = {
-            'start': 0,
-            'num': 21,
-            'type': 'player'
-        }
-        if assetId:
-            params['maskedDefId'] = assetId
-        if maxBuy:
-            params['maxb'] = maxBuy
-        if maxBid:
-            params['macr'] = maxBid
-        if position:
-            params['pos'] = position
-        if quality:
-            params['lev'] = quality
-        if nation:
-            params['nat'] = nation
-        if league:
-            params['leag'] = league
-        if club:
-            params['team'] = club
-        if playStyle:
-            params['playStyle'] = playStyle
 
+        params = {'start': start, 'num': num, 'type': type}
+
+        args = locals()
+        for arg in args:
+            if arg!='self':
+                params[arg] = args[arg]
+        
         events = [self.pin.event('page_view', 'Hub - Transfers'), self.pin.event('page_view', 'Transfer Market Search')]
         self.pin.send(events)
+
         resp = self.request(method, url, params=params)
+
         events = [self.pin.event('page_view', 'Transfer Market Results - List View')]
         self.pin.send(events)
 
         return resp
 
-    def buy(self, tradeId, buy):
-        """ Buy Item on Auction House
-        """
+    def buy(self, tradeId, bid):
+        """ Tries to Buy Item """
 
         method = 'PUT'
         url = 'trade/%s/bid' % tradeId
-        data = {'bid': buy}
+        data = {'bid': bid}
+        self.request(method, url, data=json.dumps(data))
 
-        events = [self.pin.event('page_view', 'Hub - Transfers'), self.pin.event('page_view', 'Transfer List - List View')]
-        self.pin.send(events)
-        resp = self.request(method, url, data=json.dumps(data))
+        return resp
 
-        if 'itemData' in resp:
-            return True
-        else:
-            return False
-
-    def sell(self, itemId, buy, realBid=None, duration=3600):
-        """ Sell Item on Auction House
-        """
-
+    def sell(self, itemId, buyNowPrice, duration=3600):
+        """ Search Item """
+        buyNowPrice, startingBid = self.getBid(buyNowPrice)
         method = 'POST'
         url = 'auctionhouse'
-        
+        data = {'buyNowPrice': buyNowPrice, 'duration': duration, 'itemData': {'id': itemId}, 'startingBid': startingBid}
+        resp = self.request(method, url, data=json.dumps(data))
+
+        return resp
+
+    def price(self, assetId):
+        """ Get Item Price """
+
+        buy = 0
+        lastBuy = 0
+        start = 0
+        while(True):
+            if buy == 0:
+                resp = self.search(maskedDefId=assetId, start=start)
+            else:
+                resp = self.search(maskedDefId=assetId, maxb=buy, start=start)
+
+            
+            if 'auctionInfo' in resp:        
+                for auction in resp['auctionInfo']:
+                    if auction['buyNowPrice'] < buy or buy == 0:
+                        buy = auction['buyNowPrice']
+
+                if len(resp['auctionInfo']) < 2:
+                    return buy
+                elif len(resp['auctionInfo']) == 21 and buy == lastBuy:
+                    start += 20
+                elif buy == lastBuy:
+                    if buy == 200: return 199
+                    return buy 
+            else: 
+                return buy
+
+            lastBuy = buy
+
+    def getBid(self, buy):
+        """ Get the next closest bid value after buy's value """
+
         if buy < 1000:
             buy = buy - (buy % 50)
             bid = buy - 50
@@ -464,77 +502,26 @@ class Core(object):
             if buy == 50000:
                 bid = 49500
 
-        if realBid:
-            bid = realBid
+        return buy, bid
 
-        data = {'buyNowPrice': buy, 'duration': duration, 'itemData': {'id': itemId}, 'startingBid': bid}
-        self.request(method, url, data=json.dumps(data))
+    def clearTradepile(self):
+        """ Clear Tradepile """                
 
-        return True
-
-    def price(self, assetId):
-        """ Get Item Price
-        """
-
-        oldBuy = 0
-        buy = 0
-        while(True):
-            if buy == 0:
-                resp = self.auction(assetId=assetId)
-            else:
-                resp = self.auction(assetId=assetId, maxBuy=buy)
-            
-            count = 0
-            if 'auctionInfo' in resp:
-                for auction in resp['auctionInfo']:
-                    if auction['buyNowPrice'] < buy or buy == 0:
-                        buy = auction['buyNowPrice']
-                    count += 1
-
-            if count < 3:
-                return buy
-            elif buy == 200:
-                return 199
-            
-            if oldBuy == buy:
-                return buy
-            oldBuy = buy          
-
-    def clearSold(self):
-        """ Clear Trade Pile
-        """
-
-        method = 'DELETE'
-        url = 'trade/sold'
-
-        resp = self.request(method, url)
-
-        print(resp)
-
-    def clearTradepile(self, tradepile):
-        """ Clear Full Tradepile
-        """
+        tradepile = self.tradepile()
+        self.clearSold()
 
         discard = []
         for auction in tradepile['auctionInfo']:
-            if auction['tradeState'] == 'expired' or auction['tradeState'] == None:   
-                if auction['itemData']['rating'] < 82:
+            if auction['tradeState'] != 'active' and auction['itemData']['itemType'] == 'player':
+                if auction['buyNowPrice'] == 200:
+                    discard.append(auction['itemData']['id'])
+                else:
                     buy = self.price(auction['itemData']['assetId'])
-                    if buy > 199:
-                        sold = self.sell(auction['itemData']['id'], buy)
-                        self.toString('clearTradepile: Selling Player for %s : %s' % (buy, sold))
-                    elif buy > 0:
+                    if buy < 200 and buy != 0:
                         discard.append(auction['itemData']['id'])
-                        self.toString('clearTradepile: Adding Player to Discard')
-                elif auction['itemData']['resourceId'] == 5002004:
-                    sold = self.sell(auction['itemData']['id'], 1000)
-                    self.toString('clearTradepile: Selling Squad Fitness for %s : %s' % (buy, sold))
-                    
-
-        if discard:
-            self.quickSell(discard)
-            self.toString('clearTradepile: Quick Selling Discard')
-
+                    elif buy > 200:
+                        buy, bid = getBid(buy)
+                        self.sell(auction['itemData']['id'], buy, bid)
 
     """
 
@@ -599,9 +586,14 @@ class Core(object):
             for challenge in challenges['challenges']:
                 if challenge['challengeId'] == challengeId:
                     if challenge['status'] == 'IN_PROGRESS':
+                        print('in progress')
                         squad = self.getSquad(challengeId)
                     elif challenge['status'] == 'NOT_STARTED':
+                        print('not started')
                         squad = self.getSquad(challengeId, started=False)
+                    else:
+                        print('completed')
+                        return False
 
         if squad == None:
             return False
@@ -609,6 +601,7 @@ class Core(object):
         players = []
         moved = False
         count = 0
+        print(squad)
         for i, player in enumerate(squad['squad']['players']):
             if player['itemData']['id'] == 0 and not moved:
                 players.append({'index': i, 'itemData': {'id': int(itemId), 'dream': 'false'}})
@@ -673,30 +666,50 @@ class Core(object):
         """ Find Player SetId
         """
 
-        leagues = [(13, 262), (16, 116), (31, 156), (53, 367), (19, 95), (39, 149)]
+        leagues = [(13, 262), (16, 116), (31, 156), (53, 367), (19, 95), (39, 149), (14, 280), (350, 162), (2012, 107), (308, 155)]
         for league in leagues:
             if league[0] == leagueId:
                 return league[1]
 
         return 0
 
-    def findChallenge(self, setId, clubId):
+    def findChallenge(self, setId, clubId, challengeId=None):
         """ Find Player ChallengeId
         """
 
         challenges = self.getChallenges(setId)
         for challenge in challenges['challenges']:
-            for item in challenge['elgReq']:
-                if item['type'] == 'CLUB_ID':
-                    if item['eligibilityValue'] == clubId:
-                        challengeId = challenge['challengeId']
-                        if challenge['status'] == 'IN_PROGRESS':
-                            return self.getSquad(challengeId), challengeId
-                        elif challenge['status'] == 'NOT_STARTED':
-                            return self.getSquad(challengeId, started=False), challengeId
+            if not challengeId:
+                for item in challenge['elgReq']:
+                    if item['type'] == 'CLUB_ID':
+                        if item['eligibilityValue'] == clubId:
+                            challengeId = challenge['challengeId']
+                            if challenge['status'] == 'IN_PROGRESS':
+                                return self.getSquad(challengeId), challengeId
+                            elif challenge['status'] == 'NOT_STARTED':
+                                return self.getSquad(challengeId, started=False), challengeId
+            elif challengeId == challenge['challengeId']:
+                if challenge['status'] == 'IN_PROGRESS':
+                    return self.getSquad(challengeId)
+                elif challenge['status'] == 'NOT_STARTED':
+                    return self.getSquad(challengeId, started=False)
 
-        return [], 0
-            
+        return None, 0
+
+    def clearSquad(self, squad, challengeId):
+        players = []
+        for i, player in enumerate(squad['squad']['players']):
+            players.append({'index': i, 'itemData': {'id': player['itemData']['id'], 'dream': 'false'}})
+
+        for player in players:
+            if player['itemData']['id'] == 0:
+                continue
+            player['itemData']['id'] = 0
+            method = 'PUT'
+            url = 'sbs/challenge/%s/squad' % challengeId
+            data = {'players': players}
+            resp = self.request(method, url, data=json.dumps(data))
+
 
     """
     BRONZE PACK METHODS
@@ -708,22 +721,32 @@ class Core(object):
         """
 
         discard = []
-        unassigned = self.unassigned()
         positions = [['GK'], ['RB'], ['CB'], ['CB'], ['LB'], ['CDM', 'CM'], ['RM', 'RW'], ['LM', 'LW'], ['CAM', 'CM'], ['ST'], ['ST']]
+
+        if packId == 100:
+            opened = self.openPack(packId)
+            self.toString('bronzeMethod: Opened New Pack')
+        else:
+            opened = self.openPack(packId, preorder=True)
+            self.toString('bronzeMethod: Opened New Pack')
+
+        unassigned = self.unassigned()
 
         for item in unassigned['itemData']:
             if item['itemType'] == 'player':
-
+                
+                added = True
                 setId = self.findSet(item['leagueId'])
                 self.toString('bronzeMethod: SetId: %s' % setId)
-                
+
                 if setId != 0:
                     sent = self.sendToPile('club', item['id'])
                     self.toString('bronzeMethod: Sent League Player to Club : %s' % sent)
                     if sent:
                         added = self.addPlayer(item['id'], setId=setId, leagueId=item['leagueId'], clubId=item['teamid'])
                         self.toString('bronzeMethod: Added League Player to SBC : %s' % added)
-                        continue
+                        if added:
+                            continue
                 
                 buy = self.price(item['assetId'])
                 self.toString('bronzeMethod: Price: %s' % buy)
@@ -737,17 +760,21 @@ class Core(object):
 
                 sent = self.sendToPile('club', item['id'])
                 self.toString('bronzeMethod: Sent Player to Club : %s' % sent)
-                if sent:
-                    for i, postionList in enumerate(positions):
-                        for position in postionList:
+                if sent or not added:
+                    for i, positionList in enumerate(positions):
+                        for position in positionList:
                             if position == item['preferredPosition']:
                                 print(position)
+                                if position == 'RW':
+                                    position = 'RM'
+                                if position == 'LW':
+                                    position = 'LM'
                                 if item['rating'] < 65:
-                                    self.positions[0][i].append(item['id'])
+                                    self.positions['bronze'][position].append(item['id'])
                                 elif item['rating'] < 75:
-                                    self.positions[1][i].append(item['id'])
+                                    self.positions['silver'][position].append(item['id'])
                                 else:
-                                    self.positions[2][i].append(item['id'])
+                                    self.positions['gold'][position].append(item['id'])
                     continue
 
             elif item['resourceId'] == 5002004:
@@ -771,19 +798,17 @@ class Core(object):
             sold = self.quickSell(discard)
             self.toString('bronzeMethod: Quick Selling Discard : %s' % sold)
 
-        opened = self.openPack(packId)
-        self.toString('bronzeMethod: Opened New Pack')
 
     def upgradeSbc(self):
         """ Bronze Pack Method
         """
 
-        positions = [['GK'], ['RB'], ['CB'], ['CB'], ['LB'], ['CDM', 'CM'], ['RM, RW'], ['LM, LW'], ['CAM', 'CM'], ['ST'], ['ST']]
+        positions = [['GK'], ['RB'], ['CB'], ['CB'], ['LB'], ['CDM', 'CM'], ['RM', 'RW'], ['LM', 'LW'], ['CAM', 'CM'], ['ST'], ['ST']]
         qualities = ['bronze', 'silver', 'gold']
 
         self.getSets()
-
         for index in range(3):
+            squad = None
             setId = 6+index
             challengeId = 15+index
             print('setId: %s, challengeId: %s' % (setId, challengeId))
@@ -800,22 +825,31 @@ class Core(object):
                 players.append({'index': i, 'itemData': {'id': player['itemData']['id'], 'dream': 'false'}})
 
             count = 0
+            
             for i, player in enumerate(players):
                 if i < 11 and player['itemData']['id'] == 0:
-                    if self.positions[index][i]:
-                        itemId = self.positions[index][i].pop()
-                        player['itemData']['id'] = itemId
-                        method = 'PUT'
-                        url = 'sbs/challenge/%s/squad' % challengeId
-                        data = {'players': players}
-                        resp = self.request(method, url, data=json.dumps(data))
-                        print('added to sbc, %s - %s' % (qualities[index], count))
-                        count += 1
-                        continue
+                    print('checking for player')
+                    for position in positions[i]:
+                        if position == 'RW':
+                            position = 'RM'
+                        if position == 'LW':
+                            position = 'LM'
+                        if self.positions[qualities[index]][position]:
+                            itemId = self.positions[qualities[index]][position].pop()
+                            player['itemData']['id'] = itemId
+                            method = 'PUT'
+                            url = 'sbs/challenge/%s/squad' % challengeId
+                            data = {'players': players}
+                            resp = self.request(method, url, data=json.dumps(data))
+                            print('added to sbc, %s - %s' % (qualities[index], count))
+                            count += 1
+                            break
+                        else:
+                            print('No more %s players in postion %s' % (qualities['index'], position))
+                
                 elif i < 11 and player['itemData']['id'] != 0:
                     count += 1
-            print(players)
-            print(count)
+
             if count > 10:
                 method = 'PUT'
                 url = 'sbs/challenge/%s' % challengeId
@@ -825,31 +859,55 @@ class Core(object):
                     print('completed sbc, %s' % qualities[index])
                     self.bronzeMethod(resp['grantedSetAwards'][0]['value'])
     
-    def checkUpgrades(self):
+    # def checkUpgrades(self):
+    #     """ Format Message
+    #     """
+
+    def fillUpgrades(self):
         """ Format Message
         """
 
-        for i in range(3):
-            ready = True
-            for j in range(11):
-                if not self.positions[i][j]:
-                    self.toString('checkUpgrades: %s Not Ready' % i)
-                    ready = False
-                    break
-            else:
-                ready = False
+        positionList = [['GK'], ['RB'], ['CB'], ['CB'], ['LB'], ['CDM', 'CM'], ['RM', 'RW'], ['LM', 'LW'], ['CAM'], ['CM'], ['ST'], ['ST']]
+        qualities = ['bronze', 'silver']
 
-            if ready:
-                self.upgradeSbc()
+        self.clearSquad(self.findChallenge(6, 0, challengeId=15), 15)
+        self.clearSquad(self.findChallenge(7, 0, challengeId=16), 16)
+        self.clearSquad(self.findChallenge(8, 0, challengeId=17), 17)
+
+        for i, quality in enumerate(qualities):
+            for j, positions in enumerate(positionList):
+                for position in positions:
+                    start = 0
+                    same = False
+                    while(True):
+                        count = 0
+                        items = self.club(quality=quality, position=position, start=start)
+                        if 'itemData' in items:
+                            if len(items['itemData']) > 0:
+                                for item in items['itemData']:
+                                    if self.findSet(item['leagueId']) == 0 and item['rating'] < 81:
+                                        if position == 'RW':
+                                            position = 'RM'
+                                        if position == 'LW':
+                                            position = 'LM'
+
+                                        if item['rating'] < 65:
+                                            self.positions['bronze'][position].append(item['id'])
+                                        elif item['rating'] < 75:
+                                            self.positions['silver'][position].append(item['id'])
+                                        else:
+                                            self.positions['gold'][position].append(item['id'])
+                                        count += 1
+                            else:
+                                break
+                        else:
+                            break
 
 
-
-                            
-
-
-                                
-
-
-
+                        start += 91
         
-
+    # def fillLeagueSbc(self):
+    #     leagues = [(13, 262), (16, 116), (31, 156), (53, 367), (19, 95), (39, 149)]
+    #     for league in leagues:
+    #         club = self.club(league=league[0])
+    #         challenges = self.getChallenges(league[1])

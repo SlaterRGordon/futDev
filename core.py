@@ -267,7 +267,7 @@ class Core(object):
         else:
             return False
 
-    def club(self, league=None, club=None, position=None, quality=None, rating=None, start=0, count=91):
+    def club(self, league=None, club=None, position=None, quality=None, start=0, count=91):
         """ Get Club Items
         """
 
@@ -294,7 +294,6 @@ class Core(object):
             params['level'] = quality
 
         resp = self.request(method, url, params=params)
-        print(params)
         events = [self.pin.event('page_view', 'Club - Players - List View')]
         self.pin.send(events)
 
@@ -601,7 +600,7 @@ class Core(object):
         players = []
         moved = False
         count = 0
-        print(squad)
+
         for i, player in enumerate(squad['squad']['players']):
             if player['itemData']['id'] == 0 and not moved:
                 players.append({'index': i, 'itemData': {'id': int(itemId), 'dream': 'false'}})
@@ -824,6 +823,8 @@ class Core(object):
             for i, player in enumerate(squad['squad']['players']):
                 players.append({'index': i, 'itemData': {'id': player['itemData']['id'], 'dream': 'false'}})
 
+
+            print(players)
             count = 0
             
             for i, player in enumerate(players):
@@ -845,7 +846,7 @@ class Core(object):
                             count += 1
                             break
                         else:
-                            print('No more %s players in postion %s' % (qualities['index'], position))
+                            print('No more %s players in position %s' % (qualities[index], position))
                 
                 elif i < 11 and player['itemData']['id'] != 0:
                     count += 1
@@ -906,8 +907,51 @@ class Core(object):
 
                         start += 91
         
-    # def fillLeagueSbc(self):
-    #     leagues = [(13, 262), (16, 116), (31, 156), (53, 367), (19, 95), (39, 149)]
-    #     for league in leagues:
-    #         club = self.club(league=league[0])
-    #         challenges = self.getChallenges(league[1])
+    def fillLeagueSbc(self):
+        leagues = [(13, 262), (16, 116), (31, 156), (53, 367), (19, 95), (39, 149)]
+        print('filling league sbcs')
+        for league in leagues:
+            challenges = self.getChallenges(league[1])
+            for challenge in challenges['challenges']:
+                if challenge['status'] == 'IN_PROGRESS':
+                    squad = self.getSquad(challenge['challengeId'])
+                elif challenge['status'] == 'NOT_STARTED':
+                    squad = self.getSquad(challenge['challengeId'], started=False)
+                else:
+                    print('completed sbc')
+                    continue
+                for item in challenge['elgReq']:
+                    if item['type'] == 'CLUB_ID':
+                        club = self.club(club=item['eligibilityValue'])
+                        if 'itemData' in club:
+                            for player in club['itemData']:
+                                count = 0
+                                if player['rating'] < 82:
+                                    sbcPlayers = []
+                                    for i, sbcPlayer in enumerate(squad['squad']['players']):
+                                        if sbcPlayer['itemData']['id'] != 0:
+                                            count += 1
+                                        if sbcPlayer['itemData']['id'] == player['id']:
+                                            moved = False
+                                        sbcPlayers.append({'index': i, 'itemData': {'id': player['id'], 'dream': 'false'}})
+
+                                    if not moved:
+                                        continue
+
+                                    for i, sbcPlayer in enumerate(sbcPlayers):
+                                        if sbcPlayer['itemData']['id'] == 0:
+                                            sbcPlayer['itemData']['id'] = player['id']
+                                            method = 'PUT'
+                                            url = 'sbs/challenge/%s/squad' % challenge['challengeId']
+                                            data = {'players': sbcPlayers}
+                                            resp = self.request(method, url, data=json.dumps(data))
+                                            count += 1
+                                            break
+
+                                        
+                            self.toString(challenge['name'] + ': ' + str(count))
+
+                    
+
+
+ 
